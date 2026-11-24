@@ -7,6 +7,7 @@ internal static class NativeMethods
 {
     public const int GWL_EXSTYLE = -20;
     public const int GWLP_HWNDPARENT = -8;
+    public const long WS_EX_TOPMOST = 0x00000008;
     public const long WS_EX_TOOLWINDOW = 0x00000080;
     public const long WS_EX_APPWINDOW = 0x00040000;
 
@@ -124,6 +125,11 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetParent(IntPtr hWnd);
+
+    public const uint GW_HWNDPREV = 3;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

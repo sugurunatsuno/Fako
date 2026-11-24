@@ -10,6 +10,24 @@ internal static class Desktop
 
     public static IntPtr GetProgman() => FindWindow("Progman", null);
 
+    /// <summary>
+    /// デスクトップの土台になっているウィンドウ（Progman / WorkerW）。
+    /// 前面にあるものを優先し、見つからなければ SHELLDLL_DefView の親、最後に Progman を返す。
+    /// </summary>
+    public static IntPtr GetDesktopRoot()
+    {
+        var foreground = GetForegroundWindow();
+        if (GetClassName(foreground) is "Progman" or "WorkerW") return foreground;
+
+        var defView = FindDefView();
+        if (defView != IntPtr.Zero)
+        {
+            var root = GetParent(defView);
+            if (GetClassName(root) is "Progman" or "WorkerW") return root;
+        }
+        return GetProgman();
+    }
+
     public static IntPtr FindDefView()
     {
         var progman = GetProgman();

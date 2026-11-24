@@ -350,8 +350,10 @@ public partial class FenceWindow : Window
     // 張り付きの方針:
     //   通常は Z オーダー最背面（デスクトップ Progman の直上）に固定する。
     //   ただし Windows 11 の「デスクトップの表示」(Win+D) やデスクトップのクリックでは
-    //   デスクトップ自体が前面に来てフェンスが隠れるので、そのときだけ最前面へ持ち上げる
-    //   （App の ForegroundWatcher が SetRaised を呼ぶ）。
+    //   デスクトップ自体が前面に来てフェンスが隠れるので、そのときだけデスクトップの直上へ
+    //   持ち上げる（App の ForegroundWatcher が SetRaised を呼ぶ）。
+    //   このとき HWND_TOP にすると他のアプリの上に出てしまうため、必ずデスクトップの
+    //   1 つ上にあるウィンドウを基準にする。
     //
     // ※ Progman を所有者にする定番の手は、Windows 10/11 対応を manifest で宣言した
     //   プロセスでは SetWindowLongPtr(GWLP_HWNDPARENT) が ERROR_INVALID_PARAMETER で拒否されるため使わない。
@@ -379,8 +381,29 @@ public partial class FenceWindow : Window
     {
         _raised = raised;
         if (_hwnd == IntPtr.Zero || !IsVisible || _peek) return;
-        SetWindowPos(_hwnd, raised ? HWND_TOP : HWND_BOTTOM, 0, 0, 0, 0,
+        var insertAfter = raised ? DesktopInsertAfter() : HWND_BOTTOM;
+        if (insertAfter == _hwnd) return; // 既にデスクトップの直上にある
+        SetWindowPos(_hwnd, insertAfter, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    /// <summary>
+    /// デスクトップのすぐ上に挿入するための hWndInsertAfter。
+    /// HWND_TOP だと、デスクトップをクリックしただけで他のアプリより前面に出てしまうため、
+    /// デスクトップの 1 つ上にあるウィンドウ（無ければ HWND_TOP）を基準にする。
+    /// </summary>
+    private static IntPtr DesktopInsertAfter()
+    {
+        var desktop = Desktop.GetDesktopRoot();
+        if (desktop == IntPtr.Zero) return HWND_TOP;
+
+        var above = NativeMethods.GetWindow(desktop, GW_HWNDPREV);
+        if (above == IntPtr.Zero) return HWND_TOP;
+
+        // トップモストのウィンドウを基準にすると、こちらもトップモスト扱いになることがある。
+        // その場合は通常ウィンドウ帯の先頭（HWND_TOP）に置く。
+        long ex = GetWindowLongPtr(above, GWL_EXSTYLE).ToInt64();
+        return (ex & WS_EX_TOPMOST) != 0 ? HWND_TOP : above;
     }
 
     /// <summary>Peek 中は全ウィンドウの上（最前面）に出し、終わったら通常の Z オーダーへ戻す。</summary>
@@ -409,8 +432,16 @@ public partial class FenceWindow : Window
         }
 
         if (_hwnd == IntPtr.Zero || !IsVisible) return;
-        SetWindowPos(_hwnd, on ? HWND_TOPMOST : (_raised ? HWND_TOP : HWND_BOTTOM), 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        if (on)
+        {
+            SetWindowPos(_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        }
+        else
+        {
+            // 通常の Z オーダーへ戻す。_raised ならデスクトップの直上、そうでなければ最背面。
+            SetRaised(_raised);
+        }
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
