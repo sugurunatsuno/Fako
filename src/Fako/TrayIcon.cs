@@ -34,6 +34,7 @@ internal sealed class TrayIcon : IDisposable
     private readonly WinForms.ContextMenuStrip _menu;
     private readonly DispatcherTimer _retryTimer;
     private bool _added;
+    private bool _version4;
     private int _retries;
 
     public TrayIcon(App app)
@@ -83,7 +84,8 @@ internal sealed class TrayIcon : IDisposable
         if (_added)
         {
             data.uVersion = NOTIFYICON_VERSION_4;
-            Shell_NotifyIcon(NIM_SETVERSION, ref data);
+            _version4 = Shell_NotifyIcon(NIM_SETVERSION, ref data);
+            if (!_version4) Log.Info("tray icon NIM_SETVERSION failed; using legacy notifications");
             Log.Info("tray icon added");
         }
         else
@@ -123,11 +125,16 @@ internal sealed class TrayIcon : IDisposable
             {
                 case NIN_SELECT:
                 case NIN_KEYSELECT:
-                case WM_LBUTTONUP:
+                    _app.ToggleAllHidden();
+                    break;
+                // バージョン 4 が使えないときだけ、従来のメッセージも受ける
+                case WM_LBUTTONUP when !_version4:
                     _app.ToggleAllHidden();
                     break;
                 case WM_CONTEXTMENU:
-                case WM_RBUTTONUP:
+                    ShowMenu();
+                    break;
+                case WM_RBUTTONUP when !_version4:
                     ShowMenu();
                     break;
             }

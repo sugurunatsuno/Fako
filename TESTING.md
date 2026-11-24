@@ -1,6 +1,6 @@
 # テストと動作確認
 
-対象バージョン: **1.0.0**
+対象バージョン: **1.0.1**
 
 このドキュメントは、リリース前に行った自動テスト・スモークテストと、
 実機でしか確認できない項目のチェックリストです。
@@ -11,10 +11,11 @@
 dotnet test tests/Fako.Tests/Fako.Tests.csproj -c Release
 ```
 
-- **101 件 / 失敗 0 / スキップ 0**（約 0.2 秒、UI・ネットワーク不使用）
+- **103 件 / 失敗 0 / スキップ 0**（約 0.2 秒、UI・ネットワーク不使用）
 - 内訳:
   - `UpdateServiceTests` — リリースタグのバージョン解析（v 付き、pre-release、build メタデータ、不正値）
   - `ConfigStoreLayoutTests` — 設定の書き出し／読み込み、タブ、シークレット除去、形式・バージョン拒否、旧形式移行
+  - `ConfigMigrationTests` — `Items` / `Tabs` / `Fences` などが null の設定を正規化する
   - `RuleEngineTests` — 拡張子・種類・名前・正規表現の条件評価と検証
   - `FolderListingTests` — フォルダー列挙の境界、最近のファイルのクランプ・並び順、自然順
 
@@ -40,7 +41,7 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 
 ### CI/CD
 
-- main への push で `Build and test` が成功（ビルド＋101 テスト）。
+- main への push で `Build and test` が成功（ビルド＋103 テスト）。
 - 続く `Publish release` が `v1.0.0` を作成し、`Fako.exe` / `Fako.exe.sha256` / `Fako-1.0.0-win-x64.zip` をアップロード。
 - 同じバージョンで再 push した場合は、既存 Release を検出して公開処理をスキップ。
 - リポジトリは public。`https://api.github.com/repos/sugurunatsuno/Fako/releases/latest` が `v1.0.0` を返すことを確認。
@@ -85,6 +86,12 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | 常駐 | トレイメニュー、自動起動、設定フォルダーを開く | 自動（登録）／手動（メニュー） |
 | アップデート | 起動時確認、手動確認、ダウンロード、SHA256、再起動 | 自動（解析・通信・適用）／手動（通知 UI） |
 | CI/CD | main push でビルド・テスト・Release 自動作成 | 自動（GitHub Actions）／手動（資産の実行確認） |
+
+## 1.0.1 の修正
+
+- `config.json` の `Items` / `Tabs` / `Fences` が null でも起動できるよう、読み込み時に正規化。
+- 検索パレットの対象をローカルのフェンスに限定（ドキュメントの「SSH は対象外」と一致）。
+- トレイ左クリックの二重トグルを修正。`NOTIFYICON_VERSION_4` が使えない場合だけ従来メッセージを処理。
 
 ## リリース前に手動で見る優先順位
 

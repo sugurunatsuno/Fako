@@ -241,15 +241,19 @@ public sealed class AppConfig
     /// <summary>古い形式の設定を今の形式に直す。</summary>
     public void Migrate()
     {
+        Fences ??= new();
+        Fences.RemoveAll(f => f is null);
         foreach (var f in Fences)
         {
             f.Tabs ??= new();
+            f.Tabs.RemoveAll(t => t is null);
             foreach (var t in f.Tabs) t.Tabs = new(); // タブの入れ子は作らない
             f.ActiveTab = Math.Clamp(f.ActiveTab, 0, f.Tabs.Count);
         }
         foreach (var f in AllPages())
         {
             f.Style ??= new FenceStyle();
+            f.Items ??= new();
             if (!string.IsNullOrEmpty(f.Color))
             {
                 f.Style.Background = f.Color;

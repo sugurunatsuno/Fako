@@ -650,12 +650,15 @@ public partial class App : Application
     /// <summary>Ctrl+Alt+F: 全フェンス横断の検索パレット。</summary>
     public void TogglePalette() => PaletteWindow.Toggle();
 
-    /// <summary>検索パレット用: 全フェンスの表示中アイテム。</summary>
+    /// <summary>検索パレット用: 全フェンスの表示中アイテム（SSH は対象外）。</summary>
     public IEnumerable<(FenceWindow Fence, FenceItem Item)> EnumerateItems()
     {
         foreach (var w in _windows.ToList())
+        {
+            if (w.Config.Mode == FenceMode.Remote) continue;
             foreach (var item in w.VisibleItems)
                 yield return (w, item);
+        }
     }
 
     /// <summary>書き出したレイアウトを適用する（現在のフェンスを閉じて作り直す）。</summary>
