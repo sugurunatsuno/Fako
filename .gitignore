@@ -1,0 +1,14 @@
+bin/
+obj/
+dist/
+.test-home/
+*.user
+.vs/
+
+# 自己完結版の exe は 100MB を超えるため Git には入れず、Release に添付する
+app/*.exe
+*.zip
+
+# Python
+__pycache__/
+*.pyc

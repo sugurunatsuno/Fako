@@ -1,0 +1,289 @@
+<Window x:Class="Fako.FenceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Fako"
+        Icon="Assets/fako.ico"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="True" ShowActivated="False" ResizeMode="CanResize"
+        MinWidth="120" MinHeight="28"
+        AllowDrop="True" UseLayoutRounding="True"
+        DragEnter="OnDragEnter" DragOver="OnDragOver" Drop="OnDrop"
+        PreviewMouseRightButtonUp="OnPreviewRightButtonUp"
+        PreviewMouseWheel="OnPreviewMouseWheel">
+    <!-- ShowInTaskbar=False にすると WPF が隠しウィンドウを所有者にしてしまうので True のまま。
+         タスクバー／Alt+Tab に出さないのは WS_EX_TOOLWINDOW で行う（コードビハインド）。 -->
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0"
+                      CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <DropShadowEffect x:Key="TextShadow" ShadowDepth="1" BlurRadius="3" Opacity="0.9" Color="Black" />
+
+        <!-- ===== 細いスクロールバー（縦・横） ===== -->
+        <Style x:Key="ThinThumb" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="#66FFFFFF" CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <ControlTemplate x:Key="VScrollTemplate" TargetType="ScrollBar">
+            <Track x:Name="PART_Track" Orientation="Vertical" IsDirectionReversed="True" Margin="0,2">
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource ThinThumb}" />
+                </Track.Thumb>
+            </Track>
+        </ControlTemplate>
+        <ControlTemplate x:Key="HScrollTemplate" TargetType="ScrollBar">
+            <Track x:Name="PART_Track" Orientation="Horizontal" Margin="2,0">
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource ThinThumb}" />
+                </Track.Thumb>
+            </Track>
+        </ControlTemplate>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="MinWidth" Value="6" />
+            <Setter Property="Template" Value="{StaticResource VScrollTemplate}" />
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto" />
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="Height" Value="6" />
+                    <Setter Property="MinHeight" Value="6" />
+                    <Setter Property="Template" Value="{StaticResource HScrollTemplate}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ===== アイテムの外枠 ===== -->
+        <Style x:Key="IconItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Padding" Value="4,6,4,4" />
+            <Setter Property="ToolTip" Value="{Binding Tooltip}" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="700" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="5"
+                                BorderThickness="1" BorderBrush="Transparent"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#26FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4D9CC8FF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#809CC8FF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RowItemStyle" TargetType="ListBoxItem" BasedOn="{StaticResource IconItemStyle}">
+            <Setter Property="Margin" Value="1,0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <!-- ===== 並べ方 ===== -->
+        <ItemsPanelTemplate x:Key="WrapPanelH">
+            <WrapPanel Orientation="Horizontal" />
+        </ItemsPanelTemplate>
+        <ItemsPanelTemplate x:Key="WrapPanelV">
+            <WrapPanel Orientation="Vertical" />
+        </ItemsPanelTemplate>
+        <ItemsPanelTemplate x:Key="StackPanelV">
+            <VirtualizingStackPanel Orientation="Vertical" />
+        </ItemsPanelTemplate>
+
+        <!-- 文字色・サイズ・影はフェンスの外観設定（FenceWindow の依存関係プロパティ）に従う -->
+        <Style x:Key="NameText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="FontSize" Value="{Binding ItemFontSize, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Effect" Value="{Binding ItemTextEffect, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Style>
+        <Style x:Key="SubText" TargetType="TextBlock" BasedOn="{StaticResource NameText}">
+            <Setter Property="Foreground" Value="{Binding ItemSubForeground, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="FontSize" Value="{Binding ItemSubFontSize, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Style>
+        <Style x:Key="DetailCell" TargetType="TextBlock" BasedOn="{StaticResource SubText}">
+            <Setter Property="Padding" Value="8,0,0,0" />
+        </Style>
+
+        <!-- ===== 表示ごとのテンプレート ===== -->
+        <!-- 特大／大／中アイコン -->
+        <DataTemplate x:Key="IconTemplate">
+            <StackPanel Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}" Opacity="{Binding Opacity}">
+                <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"
+                       Width="{Binding IconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Height="{Binding IconSize, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <TextBlock Text="{Binding Name}" Style="{StaticResource NameText}" Margin="0,4,0,0"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           MaxHeight="{Binding ItemNameMaxHeight, RelativeSource={RelativeSource AncestorType=Window}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- 小アイコン／一覧 -->
+        <DataTemplate x:Key="RowTemplate">
+            <DockPanel Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}" Opacity="{Binding Opacity}">
+                <Image DockPanel.Dock="Left" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <TextBlock Text="{Binding Name}" Style="{StaticResource NameText}" />
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- 詳細 -->
+        <DataTemplate x:Key="DetailsTemplate">
+            <DockPanel Opacity="{Binding Opacity}">
+                <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}" Style="{StaticResource DetailCell}" TextAlignment="Right"
+                           Width="{Binding SizeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <TextBlock DockPanel.Dock="Right" Text="{Binding TypeName}" Style="{StaticResource DetailCell}"
+                           Width="{Binding TypeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <TextBlock DockPanel.Dock="Right" Text="{Binding ModifiedText}" Style="{StaticResource DetailCell}"
+                           Width="{Binding DateColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <Image DockPanel.Dock="Left" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <TextBlock Text="{Binding Name}" Style="{StaticResource NameText}" />
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- 並べて表示 -->
+        <DataTemplate x:Key="TilesTemplate">
+            <DockPanel Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}" Opacity="{Binding Opacity}">
+                <Image DockPanel.Dock="Left" Source="{Binding Icon}" Width="40" Height="40" Margin="0,0,8,0"
+                       VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" Style="{StaticResource NameText}" />
+                    <TextBlock Text="{Binding TypeName}" Style="{StaticResource SubText}" />
+                    <TextBlock Text="{Binding SizeText}" Style="{StaticResource SubText}" />
+                </StackPanel>
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- SSH フェンスの場所バーのボタン -->
+        <Style x:Key="BarButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#30FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 詳細表示の列見出し -->
+        <Style x:Key="HeaderButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#D8FFFFFF" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" Padding="8,0,4,0">
+                            <ContentPresenter VerticalAlignment="Center"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#20FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Root" CornerRadius="8" BorderThickness="1" BorderBrush="#40FFFFFF" Background="#A0202428">
+        <DockPanel>
+            <Border x:Name="TitleBar" DockPanel.Dock="Top" Height="26" CornerRadius="7,7,0,0"
+                    Background="#1AFFFFFF" MouseLeftButtonDown="OnTitleMouseLeftButtonDown">
+                <Grid>
+                    <TextBlock x:Name="TitleText" Margin="12,0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="White" FontSize="13" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               Effect="{Binding ItemTextEffect, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <!-- タブ（ページが 2 枚以上のときだけ、タイトルの代わりに並べる） -->
+                    <UniformGrid x:Name="TabStrip" Rows="1" Visibility="Collapsed" Margin="4,3,4,0" />
+                    <TextBox x:Name="TitleEdit" Visibility="Collapsed" Margin="8,3" Padding="2,0"
+                             VerticalContentAlignment="Center" FontSize="12"
+                             KeyDown="OnTitleEditKeyDown" LostKeyboardFocus="OnTitleEditLostFocus" />
+                </Grid>
+            </Border>
+
+            <Grid x:Name="ContentArea">
+                <DockPanel>
+                    <!-- SSH フェンス: 場所のバー（上の階層へ・現在のフォルダー・更新） -->
+                    <Border x:Name="RemoteBar" DockPanel.Dock="Top" Visibility="Collapsed" Margin="6,4,6,0" Height="24"
+                            CornerRadius="4" Background="#14FFFFFF">
+                        <DockPanel>
+                            <Button x:Name="RemoteUpButton" DockPanel.Dock="Left" Content="↑" ToolTip="上の階層へ (Backspace)"
+                                    Style="{StaticResource BarButton}" Click="OnRemoteUp" />
+                            <Button DockPanel.Dock="Right" Content="⟳" ToolTip="最新の情報に更新 (F5)"
+                                    Style="{StaticResource BarButton}" Click="OnRemoteRefresh" />
+                            <TextBlock x:Name="RemotePathText" Style="{StaticResource SubText}" Margin="6,0" />
+                        </DockPanel>
+                    </Border>
+                    <!-- SSH フェンス: 状態（接続中・転送の進み具合・エラー） -->
+                    <TextBlock x:Name="RemoteStatus" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="8,2,8,4"
+                               Style="{StaticResource SubText}" />
+
+                    <Border x:Name="DetailsHeader" DockPanel.Dock="Top" Visibility="Collapsed" Height="22"
+                            Margin="7,2,13,0" BorderBrush="#33FFFFFF" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <Button x:Name="HeaderSize" DockPanel.Dock="Right" Tag="Size" Click="OnHeaderClick"
+                                    Style="{StaticResource HeaderButton}" HorizontalContentAlignment="Right"
+                                    Width="{Binding SizeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            <Button x:Name="HeaderType" DockPanel.Dock="Right" Tag="Type" Click="OnHeaderClick"
+                                    Style="{StaticResource HeaderButton}"
+                                    Width="{Binding TypeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            <Button x:Name="HeaderDate" DockPanel.Dock="Right" Tag="Modified" Click="OnHeaderClick"
+                                    Style="{StaticResource HeaderButton}"
+                                    Width="{Binding DateColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            <Button x:Name="HeaderName" Tag="Name" Click="OnHeaderClick" Style="{StaticResource HeaderButton}" />
+                        </DockPanel>
+                    </Border>
+
+                    <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="4"
+                             SelectionMode="Extended" Focusable="True"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
+                             PreviewMouseMove="OnListPreviewMouseMove"
+                             MouseDoubleClick="OnListMouseDoubleClick"
+                             KeyDown="OnListKeyDown" />
+                </DockPanel>
+                <TextBlock x:Name="EmptyHint" IsHitTestVisible="False" Margin="16"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                           TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="12"
+                           Effect="{StaticResource TextShadow}" />
+            </Grid>
+        </DockPanel>
+    </Border>
+</Window>

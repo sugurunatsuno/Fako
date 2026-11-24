@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Fako</RootNamespace>
+    <AssemblyName>Fako</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\fako.ico</ApplicationIcon>
+    <!-- WFO0003: WinForms 向けの DPI 設定の推奨。WPF アプリなので manifest で設定する -->
+    <!-- WPF0001: Window.ThemeMode（Windows 11 風の Fluent テーマ）は .NET 10 時点で試験的 API -->
+    <NoWarn>$(NoWarn);WFO0003;WPF0001</NoWarn>
+    <Version>0.8.0</Version>
+    <Product>Fako</Product>
+    <Description>デスクトップのアイコンを「フェンス」でまとめる整理ツール</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\fako.ico" LogicalName="Fako.fako.ico" />
+    <Resource Include="Assets\fako.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Fako.RemoteTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinForms は NotifyIcon のためだけに使う。WPF と名前が衝突するので暗黙の using から外す -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" Version="2026.0.1" />
+  </ItemGroup>
+
+</Project>
+
+
+
+
+
+
+

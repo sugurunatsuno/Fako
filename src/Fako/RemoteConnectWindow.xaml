@@ -1,0 +1,104 @@
+<Window x:Class="Fako.RemoteConnectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SSH フェンスの接続先" Width="620" SizeToContent="Height" ResizeMode="NoResize"
+        Icon="Assets/fako.ico"
+        ThemeMode="System" WindowStartupLocation="CenterScreen"
+        FontFamily="Yu Gothic UI" FontSize="13">
+    <Window.Resources>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="20,16,20,16">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="~/.ssh/config" Style="{StaticResource Label}" />
+            <ComboBox x:Name="SshConfigCombo" Grid.Column="1" SelectionChanged="OnSshConfigSelected" />
+
+            <TextBlock Grid.Row="1" Text="ホスト" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0">
+                <TextBox x:Name="PortBox" DockPanel.Dock="Right" Width="80" Margin="8,0,0,0" ToolTip="ポート" />
+                <TextBlock DockPanel.Dock="Right" Text="ポート" VerticalAlignment="Center" Margin="12,0,0,0" />
+                <TextBox x:Name="HostBox" />
+            </DockPanel>
+
+            <TextBlock Grid.Row="2" Text="ユーザー名" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <TextBox x:Name="UserBox" Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" />
+
+            <TextBlock Grid.Row="3" Text="認証" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                <RadioButton x:Name="KeyRadio" Content="秘密鍵ファイル" GroupName="Auth" Checked="OnAuthChanged" MinWidth="140" />
+                <RadioButton x:Name="PasswordRadio" Content="パスワード" GroupName="Auth" Checked="OnAuthChanged" />
+            </StackPanel>
+
+            <TextBlock x:Name="KeyLabel" Grid.Row="4" Text="鍵ファイル" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel x:Name="KeyPanel" Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="参照…" Margin="8,0,0,0" Click="OnBrowseKey" />
+                    <TextBox x:Name="KeyFileBox" />
+                </DockPanel>
+                <TextBlock Style="{StaticResource Hint}" Text="空なら ~/.ssh/id_ed25519・id_ecdsa・id_rsa の順に使います（OpenSSH 形式の鍵）。" />
+            </StackPanel>
+
+            <TextBlock x:Name="SecretLabel" Grid.Row="5" Text="パスフレーズ" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,10,0,0">
+                <PasswordBox x:Name="SecretBox" />
+                <CheckBox x:Name="SaveSecretBox" Margin="0,6,0,0"
+                          Content="保存する（Windows の DPAPI で暗号化し、このユーザーだけが復号できます）" />
+                <TextBlock x:Name="SecretHint" Style="{StaticResource Hint}" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="6" Text="リモートのフォルダー" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,10,0,0">
+                <TextBox x:Name="PathBox" />
+                <TextBlock Style="{StaticResource Hint}" Text="空ならホームディレクトリ。フェンスの中でフォルダーを移動すると、ここも更新されます。" />
+            </StackPanel>
+
+            <CheckBox x:Name="ShowHiddenBox" Grid.Row="7" Grid.Column="1" Margin="0,10,0,0"
+                      Content="「.」で始まるファイル・フォルダーも表示する" />
+
+            <TextBlock Grid.Row="8" Text="ホスト鍵" Style="{StaticResource Label}" Margin="0,12,12,0" VerticalAlignment="Top" />
+            <StackPanel Grid.Row="8" Grid.Column="1" Margin="0,12,0,0">
+                <TextBlock x:Name="HostKeyText" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
+                <Button x:Name="ForgetHostKeyButton" Content="信頼済みのホスト鍵を削除" HorizontalAlignment="Left" Margin="0,6,0,0"
+                        Click="OnForgetHostKey" />
+            </StackPanel>
+        </Grid>
+
+        <Border x:Name="StatusBorder" Margin="0,16,0,0" Padding="10,8" CornerRadius="6" BorderThickness="1" BorderBrush="#40808080"
+                Visibility="Collapsed">
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
+        </Border>
+
+        <DockPanel Margin="0,16,0,0" LastChildFill="False">
+            <Button x:Name="TestButton" Content="接続テスト" Click="OnTest" />
+            <Button DockPanel.Dock="Right" Content="キャンセル" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+            <Button DockPanel.Dock="Right" Content="OK" MinWidth="96" IsDefault="True" Click="OnOk"
+                    Style="{DynamicResource AccentButtonStyle}" />
+        </DockPanel>
+    </StackPanel>
+</Window>
