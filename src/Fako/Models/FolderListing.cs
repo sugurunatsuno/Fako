@@ -66,6 +66,45 @@ internal static class FolderListing
             .ToList();
     }
 
+    /// <summary>「最近のファイル」の対象にするフォルダー（デスクトップ・ダウンロード・スクリーンショット）。</summary>
+    public static IEnumerable<string> RecentRoots()
+    {
+        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        return new[]
+        {
+            UserDesktop,
+            CommonDesktop,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            Path.Combine(pictures, "Screenshots"),
+            Path.Combine(pictures, "スクリーンショット"),
+        }.Where(d => !string.IsNullOrEmpty(d));
+    }
+
+    /// <summary>最近更新されたファイル（仮想フェンス用）。新しい順。</summary>
+    public static IReadOnlyList<string> RecentFiles(int hours, int max)
+    {
+        var since = DateTime.Now.AddHours(-Math.Clamp(hours, 1, 24 * 365));
+        var (showHidden, showSuperHidden) = ExplorerHiddenSettings();
+        var files = new List<FileInfo>();
+        foreach (var dir in RecentRoots().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!Directory.Exists(dir)) continue;
+            try
+            {
+                files.AddRange(new DirectoryInfo(dir).EnumerateFiles()
+                    .Where(f => f.LastWriteTime >= since
+                                && IsShown(f.Attributes, showHidden, showSuperHidden)));
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return files
+            .OrderByDescending(f => f.LastWriteTime)
+            .Take(Math.Clamp(max, 1, 1000))
+            .Select(f => f.FullName)
+            .ToList();
+    }
+
     /// <summary>エクスプローラーと同じ規則: 隠しファイルは設定次第、隠し＋システム（desktop.ini など）は「保護された OS ファイル」の設定次第。</summary>
     private static bool IsShown(FileAttributes a, bool showHidden, bool showSuperHidden)
     {

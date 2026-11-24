@@ -64,6 +64,7 @@
         <Style x:Key="IconItemStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="2" />
             <Setter Property="Padding" Value="4,6,4,4" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="ToolTip" Value="{Binding Tooltip}" />
             <Setter Property="ToolTipService.InitialShowDelay" Value="700" />
             <Setter Property="Template">
@@ -258,6 +259,22 @@
                                 <TextBlock x:Name="RemotePathText" Style="{StaticResource SubText}" Margin="6,0" />
                             </DockPanel>
                         </Border>
+
+                        <!-- フェンス内の絞り込み（Ctrl+F） -->
+                        <Border x:Name="SearchBar" DockPanel.Dock="Top" Visibility="Collapsed" Margin="6,4,6,0" Height="26"
+                                CornerRadius="4" Background="#14FFFFFF">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left" Text="🔍" Margin="7,0,2,0" VerticalAlignment="Center" Opacity="0.7" />
+                                <Button DockPanel.Dock="Right" Content="×" ToolTip="検索を閉じる (Esc)"
+                                        Style="{StaticResource BarButton}" Click="OnCloseSearch" />
+                                <TextBox x:Name="SearchBox" Margin="4,2" BorderThickness="0" Background="Transparent"
+                                         Foreground="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         CaretBrush="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         VerticalContentAlignment="Center" FontSize="12"
+                                         TextChanged="OnSearchTextChanged" PreviewKeyDown="OnSearchKeyDown" />
+                            </DockPanel>
+                        </Border>
+
                         <!-- SSH フェンス: 状態（接続中・転送の進み具合・エラー） -->
                         <TextBlock x:Name="RemoteStatus" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="8,2,8,4"
                                    Style="{StaticResource SubText}" />
@@ -284,6 +301,7 @@
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
+                                 PreviewMouseLeftButtonUp="OnListPreviewMouseLeftButtonUp"
                                  PreviewMouseMove="OnListPreviewMouseMove"
                                  MouseDoubleClick="OnListMouseDoubleClick"
                                  PreviewTextInput="OnListTextInput"
@@ -299,9 +317,14 @@
             </DockPanel>
         </Border>
 
+        <!-- まとめ移動に選んだフェンスの枠 -->
+        <Border x:Name="GroupRing" CornerRadius="{Binding CornerRadius, ElementName=Root}"
+                BorderThickness="2" BorderBrush="#E6FFB74D" IsHitTestVisible="False"
+                Visibility="Collapsed" />
+
         <!-- キーボードフォーカス中のフェンスを示す枠（レイアウトに影響しない重ね描き） -->
-        <Border x:Name="FocusRing" CornerRadius="8" BorderThickness="2" BorderBrush="#CC9CC8FF"
-                IsHitTestVisible="False">
+        <Border x:Name="FocusRing" CornerRadius="{Binding CornerRadius, ElementName=Root}"
+                BorderThickness="2" BorderBrush="#CC9CC8FF" IsHitTestVisible="False">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Visibility" Value="Collapsed" />

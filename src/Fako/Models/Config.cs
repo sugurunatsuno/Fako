@@ -16,6 +16,8 @@ public enum FenceMode
     Unsorted,
     /// <summary>SSH（SFTP）でつないだ先のフォルダー。</summary>
     Remote,
+    /// <summary>最近更新されたファイル（仮想。実体を登録しない）。</summary>
+    Recent,
 }
 
 public enum RemoteAuth
@@ -95,6 +97,9 @@ public sealed class FenceConfig
     public string? PortalPath { get; set; }
     /// <summary>SSH フェンスの接続先（Mode = Remote のとき）。</summary>
     public RemoteConfig? Remote { get; set; }
+
+    /// <summary>「最近のファイル」フェンスで何時間前までを出すか。</summary>
+    public int RecentHours { get; set; } = 24;
 
     /// <summary>
     /// タブ: このフェンス自身が 1 枚目のページで、ここに 2 枚目以降のページを持つ。
@@ -184,6 +189,10 @@ public sealed class AppConfig
 {
     public int Version { get; set; } = 1;
     public bool DoubleClickToHide { get; set; } = true;
+    /// <summary>アイコンをシングルクリックで開く（ドラッグはそのまま使える）。</summary>
+    public bool SingleClickOpen { get; set; }
+    /// <summary>画面共有向け。マウスを乗せるまで中身と名前を隠す。</summary>
+    public bool PrivacyMode { get; set; }
     /// <summary>デスクトップのアイコンをフェンスで管理するか。null = 旧設定から移行する。</summary>
     public DesktopIconMode? IconMode { get; set; }
 
@@ -266,6 +275,19 @@ public enum DesktopIconMode
     NotManaged,
 }
 
+/// <summary>設定の書き出し／読み込みに使うファイル（フェンスの配置と外観だけを運ぶ）。</summary>
+public sealed class LayoutDocument
+{
+    public const string FormatName = "fako-layout";
+    public const int CurrentVersion = 1;
+
+    public string? Format { get; set; }
+    public int FormatVersion { get; set; }
+    public string? AppVersion { get; set; }
+    public DateTime ExportedAt { get; set; } = DateTime.Now;
+    public AppConfig? Config { get; set; }
+}
+
 public sealed class HiddenRecord
 {
     public string Path { get; set; } = "";
@@ -293,6 +315,63 @@ public sealed class ConfigStore
     }
 
     public string FilePath { get; } = Path.Combine(Directory, "config.json");
+
+    /// <summary>フェンスの配置・外観・設定を JSON にする。SSH の保存済みパスワードは含めない。</summary>
+    public static string ExportLayout(AppConfig config)
+    {
+        // 参照を切るために、いったん JSON にしてから複製する
+        var copy = JsonSerializer.Deserialize<AppConfig>(JsonSerializer.Serialize(config, Options), Options)
+                   ?? new AppConfig();
+        foreach (var page in copy.AllPages())
+            if (page.Remote is { } remote) remote.ProtectedSecret = null;
+        copy.HiddenByFako.Clear();
+
+        var doc = new LayoutDocument
+        {
+            Format = LayoutDocument.FormatName,
+            FormatVersion = LayoutDocument.CurrentVersion,
+            AppVersion = typeof(ConfigStore).Assembly.GetName().Version?.ToString(3),
+            Config = copy,
+        };
+        return JsonSerializer.Serialize(doc, Options);
+    }
+
+    /// <summary>書き出した設定を読み込む。形式が違う／新しすぎる場合は null とエラーを返す。</summary>
+    public static AppConfig? ImportLayout(string json, out string? error)
+    {
+        error = null;
+        try
+        {
+            var doc = JsonSerializer.Deserialize<LayoutDocument>(json, Options);
+            if (doc is null || !string.Equals(doc.Format, LayoutDocument.FormatName, StringComparison.Ordinal))
+            {
+                error = "Fako の設定ファイルではありません。";
+                return null;
+            }
+            if (doc.FormatVersion < 1 || doc.FormatVersion > LayoutDocument.CurrentVersion)
+            {
+                error = $"このファイルは新しい形式（v{doc.FormatVersion}）のため読み込めません。Fako を更新してください。";
+                return null;
+            }
+            var config = doc.Config ?? new AppConfig();
+            foreach (var page in config.AllPages())
+                if (page.Remote is { } remote) remote.ProtectedSecret = null;
+            config.HiddenByFako ??= new();
+            config.HiddenByFako.Clear();
+            config.Migrate();
+            return config;
+        }
+        catch (JsonException ex)
+        {
+            error = $"設定ファイルを読み取れません。\n{ex.Message}";
+            return null;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
 
     private static bool _legacyChecked;
 

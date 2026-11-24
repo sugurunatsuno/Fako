@@ -5,6 +5,7 @@ using System.IO;
 using System.Windows;
 using Fako.Interop;
 using Fako.Models;
+using Microsoft.Win32;
 
 namespace Fako;
 
@@ -42,6 +43,8 @@ public partial class SettingsWindow : Window
         // 全般
         AutoStartBox.IsChecked = AutoStart.IsEnabled();
         DoubleClickBox.IsChecked = cfg.DoubleClickToHide;
+        SingleClickBox.IsChecked = cfg.SingleClickOpen;
+        PrivacyBox.IsChecked = cfg.PrivacyMode;
         ManagedRadio.IsChecked = App.Current.IsFenceManaged;
         NotManagedRadio.IsChecked = !App.Current.IsFenceManaged;
 
@@ -97,6 +100,8 @@ public partial class SettingsWindow : Window
         try { AutoStart.Set(AutoStartBox.IsChecked == true); }
         catch (Exception ex) { Log.Error("自動起動の設定に失敗", ex); }
         cfg.DoubleClickToHide = DoubleClickBox.IsChecked == true;
+        cfg.SingleClickOpen = SingleClickBox.IsChecked == true;
+        cfg.PrivacyMode = PrivacyBox.IsChecked == true;
         cfg.IconMode = ManagedRadio.IsChecked == true ? DesktopIconMode.FenceManaged : DesktopIconMode.NotManaged;
 
         cfg.SnapEnabled = SnapBox.IsChecked == true;
@@ -266,5 +271,71 @@ public partial class SettingsWindow : Window
         var path = Log.CurrentPath;
         if (path != null && File.Exists(path))
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
+    // ------------------------------------------------------------------
+    // 設定の書き出し・読み込み
+    // ------------------------------------------------------------------
+
+    private void OnExportLayout(object sender, RoutedEventArgs e)
+    {
+        if (!Apply()) return;
+        var dlg = new SaveFileDialog
+        {
+            Title = "設定の書き出し",
+            Filter = "Fako の設定 (*.json)|*.json|すべてのファイル (*.*)|*.*",
+            FileName = $"fako-layout-{DateTime.Now:yyyyMMdd}.json",
+            DefaultExt = ".json",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            File.WriteAllText(dlg.FileName, ConfigStore.ExportLayout(App.Current.Config));
+            MessageBox.Show(this, $"設定を書き出しました。\n{dlg.FileName}", "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"書き出せませんでした。\n{ex.Message}", "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnImportLayout(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "設定の読み込み",
+            Filter = "Fako の設定 (*.json)|*.json|すべてのファイル (*.*)|*.*",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        string json;
+        try { json = File.ReadAllText(dlg.FileName); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"読み込めませんでした。\n{ex.Message}", "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var incoming = ConfigStore.ImportLayout(json, out var error);
+        if (incoming is null)
+        {
+            MessageBox.Show(this, error ?? "読み込めませんでした。", "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (MessageBox.Show(this,
+                "現在のフェンスと設定を、読み込んだ内容で置き換えます。\n" +
+                "（SSH の保存済みパスワードは引き継がれません。元の設定は config.before-import-*.json に退避します）\n\n" +
+                "よろしいですか？",
+                "Fako", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+
+        if (App.Current.ReplaceLayout(incoming)) Close();
+        else MessageBox.Show(this, "読み込みに失敗しました。ログを確認してください。", "Fako",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 }

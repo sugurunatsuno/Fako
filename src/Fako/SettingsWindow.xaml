@@ -41,6 +41,15 @@
 
                         <TextBlock Text="デスクトップ" Style="{StaticResource SectionTitle}" />
                         <CheckBox x:Name="DoubleClickBox" Content="デスクトップの何もない所をダブルクリックして、フェンスを隠す／表示する" />
+                        <CheckBox x:Name="SingleClickBox" Content="アイコンをシングルクリックで開く" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="ダブルクリックの代わりに 1 回のクリックで開きます。ドラッグでの移動・コピーはそのまま使えます。" />
+
+                        <TextBlock Text="プライバシー" Style="{StaticResource SectionTitle}" />
+                        <CheckBox x:Name="PrivacyBox" Content="プライバシーモード（マウスを乗せるまで中身と名前を隠す）" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="画面共有中に使います。フェンスにマウスを乗せるか、キーボードで選ぶと一時的に表示されます。トレイのメニューからも切り替えられます。" />
+
                         <TextBlock Text="デスクトップのアイコン" Style="{StaticResource SectionTitle}" />
                         <RadioButton x:Name="ManagedRadio" GroupName="IconMode" Content="フェンスで管理する（おすすめ）" />
                         <TextBlock Style="{StaticResource Hint}"
@@ -196,6 +205,14 @@
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                         <Button Content="設定フォルダーを開く" Click="OnOpenConfigFolder" />
                         <Button Content="ログを開く" Margin="8,0,0,0" Click="OnOpenLog" />
+                    </StackPanel>
+
+                    <TextBlock Text="バックアップ" Style="{StaticResource SectionTitle}" />
+                    <TextBlock TextWrapping="Wrap" Opacity="0.8"
+                               Text="フェンスの配置・外観・自動振り分けなどの設定を JSON に書き出します。SSH の保存済みパスワードは含まれません。" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="書き出す…" Click="OnExportLayout" />
+                        <Button Content="読み込む…" Margin="8,0,0,0" Click="OnImportLayout" />
                     </StackPanel>
                 </StackPanel>
             </TabItem>

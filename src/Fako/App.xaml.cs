@@ -1,5 +1,7 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Fako.Interop;
 using Fako.Models;
@@ -21,6 +23,11 @@ public partial class App : Application
     private TrayIcon? _tray;
     private DesktopDoubleClickHook? _hook;
     private DispatcherTimer? _saveTimer;
+    private HwndSource? _hotkeySource;
+    private bool _peeking;
+    private bool _peekWasHidden;
+    private const int PeekHotkeyId = 0x0F4A;
+    private const int PaletteHotkeyId = 0x0F4B;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -83,6 +90,7 @@ public partial class App : Application
 
         try { _tray = new TrayIcon(this); }
         catch (Exception ex) { Log.Error("トレイアイコンの作成に失敗", ex); }
+        SetupHotkeys();
         ApplyDoubleClickHook();
         ApplyIconMode();
         SetupDesktopWatchers();
@@ -102,6 +110,13 @@ public partial class App : Application
                 break;
             case ["remote"]:
                 Dispatcher.BeginInvoke(() => RemoteConnectWindow.Edit(Config.AllPages().FirstOrDefault(f => f.Remote != null)?.Remote),
+                    DispatcherPriority.ApplicationIdle);
+                break;
+            case ["palette"]:
+                Dispatcher.BeginInvoke(TogglePalette, DispatcherPriority.ApplicationIdle);
+                break;
+            case ["search"]:
+                Dispatcher.BeginInvoke(() => _windows.FirstOrDefault()?.ToggleSearch(),
                     DispatcherPriority.ApplicationIdle);
                 break;
             case ["shellmenu"]:
@@ -134,6 +149,13 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_hotkeySource != null)
+        {
+            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, PeekHotkeyId);
+            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, PaletteHotkeyId);
+            _hotkeySource.Dispose();
+            _hotkeySource = null;
+        }
         _hook?.Dispose();
         _foreground?.Dispose();
         foreach (var w in _desktopWatchers) w.Dispose();
@@ -161,11 +183,16 @@ public partial class App : Application
     {
         var w = new FenceWindow(config);
         _windows.Add(w);
-        w.Closed += (_, _) => _windows.Remove(w);
+        w.Closed += (_, _) =>
+        {
+            _windows.Remove(w);
+            _groupSelection.Remove(w);
+        };
         if (!AllHidden)
         {
             w.Show();
             w.SetRaised(_raised);
+            if (_peeking) w.SetPeek(true);
         }
         return w;
     }
@@ -179,26 +206,174 @@ public partial class App : Application
     /// </summary>
     public void FocusAdjacentFence(FenceWindow from, int direction)
     {
+        var fromRect = ScreenRect(from);
         var candidates = _windows
             .Where(w => w != from && w.IsVisible && w.Handle != IntPtr.Zero)
-            .Select(w => (Window: w, SameRow: VerticalOverlap(from, w)))
+            .Select(w => (Window: w, Rect: ScreenRect(w)))
             .Where(x => direction > 0
-                ? x.Window.Left >= from.Left + from.ActualWidth - 1
-                : x.Window.Left + x.Window.ActualWidth <= from.Left + 1)
+                ? CenterX(x.Rect) > CenterX(fromRect)
+                : CenterX(x.Rect) < CenterX(fromRect))
+            .Select(x => (x.Window, x.Rect, SameRow: VerticalOverlap(fromRect, x.Rect)))
             .ToList();
         if (candidates.Count == 0) return;
 
+        // 同じ行（縦に重なる）ものを優先。無ければ左右にある中で最も近いもの。
         var pool = candidates.Any(x => x.SameRow) ? candidates.Where(x => x.SameRow) : candidates;
-        var next = direction > 0
-            ? pool.OrderBy(x => x.Window.Left).First()
-            : pool.OrderByDescending(x => x.Window.Left + x.Window.ActualWidth).First();
+        var next = pool.OrderBy(x => Math.Abs(CenterX(x.Rect) - CenterX(fromRect))).First();
         next.Window.FocusList();
     }
 
-    private static bool VerticalOverlap(FenceWindow a, FenceWindow b) =>
-        a.Top < b.Top + b.ActualHeight && b.Top < a.Top + a.ActualHeight;
+    private static double CenterX(Rect r) => r.Left + r.Width / 2;
+
+    private static bool VerticalOverlap(Rect a, Rect b) => a.Top < b.Bottom && b.Top < a.Bottom;
+
+    /// <summary>DPI の違うモニターでも比較できるよう、物理ピクセルの矩形にする。</summary>
+    private static Rect ScreenRect(FenceWindow w)
+    {
+        var p = w.PointToScreen(new Point(0, 0));
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(w);
+        double height = Math.Max(w.ActualHeight, w.Host.Height);
+        return new Rect(p.X, p.Y, w.ActualWidth * dpi.DpiScaleX, height * dpi.DpiScaleY);
+    }
+
+    // ------------------------------------------------------------------
+    // 複数フェンスのまとめ移動
+    // ------------------------------------------------------------------
+
+    private readonly HashSet<FenceWindow> _groupSelection = new();
+    private List<(FenceWindow Window, double Left, double Top)>? _groupDrag;
+    private FenceWindow? _groupDragSource;
+
+    public bool IsGroupSelected(FenceWindow w) => _groupSelection.Contains(w);
+
+    /// <summary>Ctrl+Shift+クリック、またはフェンスの右クリックから選択を切り替える。</summary>
+    public void ToggleGroup(FenceWindow w)
+    {
+        if (!_groupSelection.Remove(w)) _groupSelection.Add(w);
+        w.SetGroupSelected(_groupSelection.Contains(w));
+        if (_groupSelection.Count == 0) Log.Info("group selection cleared");
+    }
+
+    /// <summary>グループに入っているフェンスをドラッグし始めたら、相対位置を記録する。</summary>
+    public void BeginGroupDrag(FenceWindow from)
+    {
+        if (!_groupSelection.Contains(from))
+        {
+            _groupDrag = null;
+            _groupDragSource = null;
+            return;
+        }
+        _groupDragSource = from;
+        _groupDrag = _groupSelection
+            .Where(w => w.IsVisible)
+            .Select(w => (Window: w, w.Left, w.Top))
+            .ToList();
+    }
+
+    /// <summary>ドラッグ中のフェンスの移動量を、選択中の他のフェンスにも同じだけ反映する。</summary>
+    public void GroupDragMoved(FenceWindow from)
+    {
+        if (_groupDrag is null || _groupDragSource != from) return;
+        var origin = _groupDrag.FirstOrDefault(x => x.Window == from);
+        if (origin.Window is null) return;
+        var dpiFrom = System.Windows.Media.VisualTreeHelper.GetDpi(from);
+        // 物理ピクセルの移動量にしてから、各フェンスの DPI で割り直す（混在 DPI 対応）
+        double dx = (from.Left - origin.Left) * dpiFrom.DpiScaleX;
+        double dy = (from.Top - origin.Top) * dpiFrom.DpiScaleY;
+        if (dx == 0 && dy == 0) return;
+        foreach (var (w, left, top) in _groupDrag)
+        {
+            if (w == from) continue;
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(w);
+            w.Left = left + dx / dpi.DpiScaleX;
+            w.Top = top + dy / dpi.DpiScaleY;
+        }
+    }
+
+    public void EndGroupDrag()
+    {
+        _groupDrag = null;
+        _groupDragSource = null;
+    }
 
     public IReadOnlyList<FenceWindow> FenceWindows => _windows;
+
+    // ------------------------------------------------------------------
+    // 元に戻す（フェンスからの削除・フェンス間の移動）
+    // ------------------------------------------------------------------
+
+    private sealed record UndoEntry(string Kind, string PageId, string? TargetPageId,
+        List<(string Path, int Index)> Items);
+
+    private readonly List<UndoEntry> _undo = new();
+    private const int UndoLimit = 20;
+
+    public bool CanUndo => _undo.Count > 0;
+
+    private void PushUndo(UndoEntry entry)
+    {
+        _undo.Add(entry);
+        if (_undo.Count > UndoLimit) _undo.RemoveAt(0);
+    }
+
+    private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
+
+    /// <summary>フェンスから外す直前に呼ぶ。元の並び位置も覚えておく。</summary>
+    public void RecordRemoval(FenceConfig page, IEnumerable<string> paths)
+    {
+        if (page.Mode != FenceMode.Shortcuts) return;
+        var items = paths
+            .Select(p => (Path: p, Index: page.Items.FindIndex(x => PathComparer.Equals(x, p))))
+            .Where(x => x.Index >= 0)
+            .ToList();
+        if (items.Count > 0) PushUndo(new UndoEntry("remove", page.Id, null, items));
+    }
+
+    /// <summary>フェンス間の移動直前に呼ぶ。</summary>
+    public void RecordMove(string fromPageId, FenceConfig to, IEnumerable<string> paths)
+    {
+        if (to.Mode != FenceMode.Shortcuts) return;
+        if (Config.FindPage(fromPageId) is not { Mode: FenceMode.Shortcuts } from) return;
+        var items = paths
+            .Select(p => (Path: p, Index: from.Items.FindIndex(x => PathComparer.Equals(x, p))))
+            .Where(x => x.Index >= 0)
+            .ToList();
+        if (items.Count > 0) PushUndo(new UndoEntry("move", from.Id, to.Id, items));
+    }
+
+    /// <summary>直前のフェンス操作を戻す。</summary>
+    public void UndoLast()
+    {
+        if (_undo.Count == 0) return;
+        var entry = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+
+        var page = Config.FindPage(entry.PageId);
+        if (page is null) return;
+
+        if (entry.Kind == "move" && entry.TargetPageId is { } targetId
+            && Config.FindPage(targetId) is { } target)
+        {
+            var set = entry.Items.Select(i => i.Path).ToHashSet(PathComparer);
+            target.Items.RemoveAll(set.Contains);
+        }
+
+        foreach (var (path, index) in entry.Items.OrderBy(i => i.Index))
+        {
+            if (page.Items.Contains(path, PathComparer)) continue;
+            page.Items.Insert(Math.Clamp(index, 0, page.Items.Count), path);
+        }
+
+        var restored = entry.Items.Select(i => i.Path).ToHashSet(PathComparer);
+        Config.RuleExclusions.RemoveAll(restored.Contains);
+
+        foreach (var w in _windows)
+            if (w.Pages.Any(p => p.Id == entry.PageId || p.Id == entry.TargetPageId))
+                w.Reload();
+        SaveSoon();
+        _tray?.ShowBalloon("Fako", "元に戻しました");
+        Log.Info($"undo: {entry.Kind} {entry.Items.Count} items");
+    }
 
     /// <summary>ページからアイテムを外す（ドラッグで別のフェンス・タブへ移したとき）。</summary>
     public void RemoveFromPage(string pageId, IEnumerable<string> paths)
@@ -259,6 +434,12 @@ public partial class App : Application
             Top = near != null ? near.Top + 30 : wa.Top + wa.Height / 2 - 110 + offset,
         };
         if (mode == FenceMode.Unsorted) config.Title = "未整理";
+        if (mode == FenceMode.Recent)
+        {
+            config.Title = "最近のファイル";
+            config.SortKey = SortKey.Modified;
+            config.SortDescending = true;
+        }
         if (portalPath != null)
             config.Title = Path.GetFileName(portalPath.TrimEnd('\\')) is { Length: > 0 } n ? n : portalPath;
         if (title != null) config.Title = title;
@@ -273,7 +454,9 @@ public partial class App : Application
 
     /// <summary>スナップの相手になるフェンスのウィンドウハンドル。</summary>
     public IReadOnlyList<IntPtr> FenceHandles() =>
-        _windows.Where(w => w.IsVisible && w.Handle != IntPtr.Zero).Select(w => w.Handle).ToList();
+        _windows.Where(w => w.IsVisible && w.Handle != IntPtr.Zero
+                            && !(_groupDrag != null && _groupSelection.Contains(w)))
+            .Select(w => w.Handle).ToList();
 
     public void ApplyStyleToAll(FenceStyle style)
     {
@@ -290,8 +473,150 @@ public partial class App : Application
     {
         ApplyDoubleClickHook();
         ApplyIconMode();
+        foreach (var w in _windows) w.RefreshPrivacy();
         RunRules(force: false);
         SaveSoon();
+    }
+
+    /// <summary>トレイ・設定画面からプライバシーモードを切り替える。</summary>
+    public void SetPrivacyMode(bool enabled)
+    {
+        Config.PrivacyMode = enabled;
+        foreach (var w in _windows) w.RefreshPrivacy();
+        SaveSoon();
+    }
+
+    // ------------------------------------------------------------------
+    // Peek（ホットキーでフェンスを一時的に前面へ）
+    // ------------------------------------------------------------------
+
+    public bool IsPeeking => _peeking;
+
+    private void SetupHotkeys()
+    {
+        var p = new HwndSourceParameters("FakoHotkey")
+        {
+            Width = 0,
+            Height = 0,
+            WindowStyle = unchecked((int)0x80000000), // WS_POPUP
+            ExtendedWindowStyle = 0x00000080,          // WS_EX_TOOLWINDOW
+        };
+        _hotkeySource = new HwndSource(p);
+        _hotkeySource.AddHook(HotkeyWndProc);
+
+        bool ok = NativeMethods.RegisterHotKey(_hotkeySource.Handle, PeekHotkeyId,
+            NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_NOREPEAT,
+            NativeMethods.VK_SPACE);
+        if (ok) Log.Info("peek hotkey registered: Ctrl+Alt+Space");
+        else Log.Info($"peek hotkey registration failed (error={Marshal.GetLastWin32Error()})");
+
+        bool okPalette = NativeMethods.RegisterHotKey(_hotkeySource.Handle, PaletteHotkeyId,
+            NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_NOREPEAT,
+            0x46 /* F */);
+        if (okPalette) Log.Info("palette hotkey registered: Ctrl+Alt+F");
+        else Log.Info($"palette hotkey registration failed (error={Marshal.GetLastWin32Error()})");
+    }
+
+    private IntPtr HotkeyWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != NativeMethods.WM_HOTKEY) return IntPtr.Zero;
+        switch (wParam.ToInt32())
+        {
+            case PeekHotkeyId:
+                TogglePeek();
+                handled = true;
+                break;
+            case PaletteHotkeyId:
+                TogglePalette();
+                handled = true;
+                break;
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Ctrl+Alt+Space: フェンスを一時的に全ウィンドウの上へ出す。もう一度押すと元に戻る。
+    /// 一括で隠しているときは、その間だけ表示する。
+    /// </summary>
+    public void TogglePeek()
+    {
+        if (_windows.Count == 0) return;
+        _peeking = !_peeking;
+        if (_peeking)
+        {
+            _peekWasHidden = AllHidden;
+            if (AllHidden) SetAllHidden(false);
+            foreach (var w in _windows) w.SetPeek(true);
+            Log.Info("peek on");
+        }
+        else
+        {
+            foreach (var w in _windows) w.SetPeek(false);
+            if (_peekWasHidden) SetAllHidden(true);
+            _peekWasHidden = false;
+            Log.Info("peek off");
+        }
+    }
+
+    /// <summary>Ctrl+Alt+F: 全フェンス横断の検索パレット。</summary>
+    public void TogglePalette() => PaletteWindow.Toggle();
+
+    /// <summary>検索パレット用: 全フェンスの表示中アイテム。</summary>
+    public IEnumerable<(FenceWindow Fence, FenceItem Item)> EnumerateItems()
+    {
+        foreach (var w in _windows.ToList())
+            foreach (var item in w.VisibleItems)
+                yield return (w, item);
+    }
+
+    /// <summary>書き出したレイアウトを適用する（現在のフェンスを閉じて作り直す）。</summary>
+    public bool ReplaceLayout(AppConfig incoming)
+    {
+        try
+        {
+            // 読み込み後に問題があっても戻せるよう、今の設定を退避する
+            SaveNow();
+            if (File.Exists(Store.FilePath))
+            {
+                var backup = Path.Combine(ConfigStore.Directory,
+                    $"config.before-import-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+                File.Copy(Store.FilePath, backup, overwrite: true);
+                Log.Info($"layout backup: {backup}");
+            }
+
+            SetAllHidden(false);
+            foreach (var w in _windows.ToList()) w.Close();
+            _windows.Clear();
+            _undo.Clear();
+            _groupSelection.Clear();
+
+            Config = incoming;
+            if (Config.Fences.Count == 0)
+            {
+                var wa = SystemParameters.WorkArea;
+                Config.Fences.Add(new FenceConfig
+                {
+                    Title = "はじめてのフェンス",
+                    Left = wa.Left + 80,
+                    Top = wa.Top + 80,
+                    Style = Config.DefaultStyle.Clone(),
+                });
+            }
+            foreach (var fc in Config.Fences.OrderBy(f => f.Mode == FenceMode.Unsorted ? 1 : 0))
+                ShowFence(fc);
+
+            ApplyIconMode();
+            ApplyDoubleClickHook();
+            foreach (var w in _windows) w.RefreshPrivacy();
+            SaveSoon();
+            Log.Info($"layout imported: fences={Config.Fences.Count}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("レイアウトの読み込みに失敗", ex);
+            return false;
+        }
     }
 
     public void OpenSettings(int tab = 0) => SettingsWindow.ShowSingle(tab);

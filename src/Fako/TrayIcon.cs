@@ -162,17 +162,23 @@ internal sealed class TrayIcon : IDisposable
         menu.Items.Add("新しいフェンス", null, (_, _) => app.NewFence());
         menu.Items.Add("フォルダーポータルを追加…", null, (_, _) => app.NewPortalFence());
         menu.Items.Add("未整理フェンスを追加", null, (_, _) => app.NewFence(FenceMode.Unsorted));
+        menu.Items.Add("最近のファイル（仮想）を追加", null, (_, _) => app.NewFence(FenceMode.Recent));
         menu.Items.Add("SSH フェンスを追加…", null, (_, _) => app.NewRemoteFence());
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
         var toggle = new WinForms.ToolStripMenuItem("フェンスを隠す", null, (_, _) => app.ToggleAllHidden());
+        var peek = new WinForms.ToolStripMenuItem("Peek（フェンスを前面に）", null, (_, _) => app.TogglePeek());
+        var palette = new WinForms.ToolStripMenuItem("検索…（Ctrl+Alt+F）", null, (_, _) => app.TogglePalette());
+        var undo = new WinForms.ToolStripMenuItem("元に戻す（Ctrl+Z）", null, (_, _) => app.UndoLast());
         var dblClick = new WinForms.ToolStripMenuItem("デスクトップのダブルクリックで隠す／表示", null,
             (_, _) => app.SetDoubleClickToHide(!app.Config.DoubleClickToHide));
+        var privacy = new WinForms.ToolStripMenuItem("プライバシーモード", null,
+            (_, _) => app.SetPrivacyMode(!app.Config.PrivacyMode));
         var managed = new WinForms.ToolStripMenuItem("デスクトップのアイコンをフェンスで管理する", null,
             (_, _) => app.SetIconMode(app.IsFenceManaged ? DesktopIconMode.NotManaged : DesktopIconMode.FenceManaged));
         var startup = new WinForms.ToolStripMenuItem("Windows の起動時に開始", null,
             (_, _) => AutoStart.Set(!AutoStart.IsEnabled()));
-        menu.Items.AddRange(new WinForms.ToolStripItem[] { toggle, dblClick, managed, startup });
+        menu.Items.AddRange(new WinForms.ToolStripItem[] { peek, palette, undo, toggle, dblClick, privacy, managed, startup });
 
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("設定フォルダーを開く", null, (_, _) =>
@@ -185,7 +191,10 @@ internal sealed class TrayIcon : IDisposable
         menu.Opening += (_, _) =>
         {
             toggle.Text = app.AllHidden ? "フェンスを表示" : "フェンスを隠す";
+            peek.Text = app.IsPeeking ? "Peek を終了" : "Peek（フェンスを前面に）";
+            undo.Enabled = app.CanUndo;
             dblClick.Checked = app.Config.DoubleClickToHide;
+            privacy.Checked = app.Config.PrivacyMode;
             managed.Checked = app.IsFenceManaged;
             startup.Checked = AutoStart.IsEnabled();
         };

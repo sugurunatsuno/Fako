@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -94,6 +96,8 @@ public partial class FenceWindow : Window
     private int _iconPx = 64;
 
     private readonly ObservableCollection<FenceItem> _items = new();
+    private readonly ICollectionView _view;
+    private string _searchText = "";
     private readonly DispatcherTimer _collapseTimer;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _afterShellCommandTimer;
@@ -108,6 +112,12 @@ public partial class FenceWindow : Window
     private DateTime _typeBufferAt;
     private static readonly TimeSpan TypeBufferTimeout = TimeSpan.FromMilliseconds(900);
 
+    /// <summary>シングルクリックで開いた直後のダブルクリックで二重に開かないための記録。</summary>
+    private string? _lastMouseOpenPath;
+    private DateTime _lastMouseOpenAt;
+
+    private static readonly System.Windows.Media.Effects.BlurEffect PrivacyBlur = CreatePrivacyBlur();
+
     public FenceWindow(FenceConfig config)
     {
         InitializeComponent();
@@ -119,13 +129,15 @@ public partial class FenceWindow : Window
         Top = config.Top;
         Width = config.Width;
         Height = config.Height;
-        ItemsList.ItemsSource = _items;
+        _view = CollectionViewSource.GetDefaultView(_items);
+        _view.Filter = o => o is FenceItem item && MatchesSearch(item);
+        ItemsList.ItemsSource = _view;
 
         _collapseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         _collapseTimer.Tick += (_, _) =>
         {
             _collapseTimer.Stop();
-            if (IsMouseOver || _menuOpen || TitleEdit.IsVisible) return;
+            if (IsMouseOver || ItemsList.IsKeyboardFocusWithin || _menuOpen || TitleEdit.IsVisible) return;
             _hoverExpanded = false;
             ApplyRollup();
         };
@@ -143,18 +155,24 @@ public partial class FenceWindow : Window
         SourceInitialized += OnSourceInitialized;
         LocationChanged += OnLocationChanged;
         SizeChanged += OnSizeChanged;
-        MouseEnter += (_, _) => HoverExpand();
-        MouseLeave += (_, _) => ScheduleCollapse();
+        MouseEnter += (_, _) => { HoverExpand(); ApplyPrivacy(); };
+        MouseLeave += (_, _) =>
+        {
+            ScheduleCollapse();
+            Dispatcher.BeginInvoke((Action)ApplyPrivacy);
+        };
         Activated += (_, _) =>
         {
             // フェンスをクリックしたら、そのまま矢印キー・文字入力で操作できるようにする
             if (!ItemsList.IsKeyboardFocusWithin && !TitleEdit.IsVisible)
                 ItemsList.Focus();
         };
-        LostKeyboardFocus += (_, _) =>
+        IsKeyboardFocusWithinChanged += (_, _) =>
         {
+            ApplyPrivacy();
+            if (IsKeyboardFocusWithin) return;
             _typeBuffer = "";
-            if (Host.RolledUp && !IsMouseOver && !_menuOpen)
+            if (Host.RolledUp && !IsMouseOver && !_menuOpen && !TitleEdit.IsVisible)
             {
                 _hoverExpanded = false;
                 ApplyRollup();
@@ -201,7 +219,7 @@ public partial class FenceWindow : Window
         bool horizontal = Config.View == FenceView.List;
         ScrollViewer.SetHorizontalScrollBarVisibility(ItemsList, horizontal ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled);
         ScrollViewer.SetVerticalScrollBarVisibility(ItemsList, horizontal ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto);
-        ItemsList.ItemsSource = _items;
+        ItemsList.ItemsSource = _view;
 
         DetailsHeader.Visibility = Config.View == FenceView.Details ? Visibility.Visible : Visibility.Collapsed;
         UpdateDetailColumns();
@@ -351,6 +369,8 @@ public partial class FenceWindow : Window
 
     private IntPtr _hwnd;
     private bool _raised;
+    private bool _peek;
+    private bool _peekExpanded;
 
     public IntPtr Handle => _hwnd;
 
@@ -358,8 +378,38 @@ public partial class FenceWindow : Window
     public void SetRaised(bool raised)
     {
         _raised = raised;
-        if (_hwnd == IntPtr.Zero || !IsVisible) return;
+        if (_hwnd == IntPtr.Zero || !IsVisible || _peek) return;
         SetWindowPos(_hwnd, raised ? HWND_TOP : HWND_BOTTOM, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    /// <summary>Peek 中は全ウィンドウの上（最前面）に出し、終わったら通常の Z オーダーへ戻す。</summary>
+    public void SetPeek(bool on)
+    {
+        if (_peek == on) return;
+        _peek = on;
+
+        if (on)
+        {
+            if (Host.RolledUp && !_hoverExpanded)
+            {
+                _peekExpanded = true;
+                _hoverExpanded = true;
+                ApplyRollup();
+            }
+        }
+        else if (_peekExpanded)
+        {
+            _peekExpanded = false;
+            if (!IsMouseOver)
+            {
+                _hoverExpanded = false;
+                ApplyRollup();
+            }
+        }
+
+        if (_hwnd == IntPtr.Zero || !IsVisible) return;
+        SetWindowPos(_hwnd, on ? HWND_TOPMOST : (_raised ? HWND_TOP : HWND_BOTTOM), 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
 
@@ -372,7 +422,7 @@ public partial class FenceWindow : Window
             return menuResult;
         }
 
-        if (msg == WM_WINDOWPOSCHANGING && !_raised)
+        if (msg == WM_WINDOWPOSCHANGING && !_raised && !_peek)
         {
             // Z オーダーが変わるときは常に最背面へ（他のウィンドウの上に出てこない）
             var pos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
@@ -417,6 +467,7 @@ public partial class FenceWindow : Window
         Host.Left = Left;
         Host.Top = Top;
         App.Current.SaveSoon();
+        App.Current.GroupDragMoved(this);
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -496,6 +547,37 @@ public partial class FenceWindow : Window
 
         UpdateTabStrip();
         ApplyRollup();
+        ApplyPrivacy();
+    }
+
+    private static System.Windows.Media.Effects.BlurEffect CreatePrivacyBlur()
+    {
+        var blur = new System.Windows.Media.Effects.BlurEffect
+        {
+            Radius = 14,
+            KernelType = System.Windows.Media.Effects.KernelType.Gaussian,
+            RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance,
+        };
+        blur.Freeze();
+        return blur;
+    }
+
+    /// <summary>設定画面・トレイからプライバシーモードを切り替えたときに呼ぶ。</summary>
+    public void RefreshPrivacy() => ApplyPrivacy();
+
+    /// <summary>
+    /// プライバシーモード: マウスもキーボードも乗っていない間は、中身と名前をぼかす。
+    /// 画面共有中にデスクトップを映しても、ファイル名やアイコンが読めないようにする。
+    /// </summary>
+    private void ApplyPrivacy()
+    {
+        bool hide = App.Current.Config.PrivacyMode
+                    && !IsMouseOver && !IsKeyboardFocusWithin && !_menuOpen && !TitleEdit.IsVisible;
+        ContentArea.Effect = hide ? PrivacyBlur : null;
+        ContentArea.Opacity = hide ? 0.35 : 1.0;
+        TabStrip.Effect = hide ? PrivacyBlur : null;
+        TabStrip.Opacity = hide ? 0.35 : 1.0;
+        TitleText.Text = hide && !TabStrip.IsVisible ? "•••" : Config.Title;
     }
 
     private void ApplyRollup()
@@ -579,6 +661,7 @@ public partial class FenceWindow : Window
         {
             FenceMode.Portal => FolderListing.List(Config.PortalPath),
             FenceMode.Unsorted => UnsortedPaths(),
+            FenceMode.Recent => FolderListing.RecentFiles(Config.RecentHours, 100),
             _ => Config.Items,
         };
 
@@ -590,15 +673,122 @@ public partial class FenceWindow : Window
         foreach (var item in _items.Where(i => selected.Contains(i.Path)))
             ItemsList.SelectedItems.Add(item);
 
-        EmptyHint.Text = Config.Mode switch
+        EmptyHint.Text = DefaultEmptyHint();
+        UpdateEmptyHint();
+    }
+
+    private string DefaultEmptyHint() => Config.Mode switch
+    {
+        FenceMode.Portal when string.IsNullOrEmpty(Config.PortalPath) || !Directory.Exists(Config.PortalPath)
+            => "フォルダーが見つかりません\n右クリック →「種類」から選び直してください",
+        FenceMode.Portal => "このフォルダーは空です",
+        FenceMode.Unsorted => "デスクトップは片付いています ✨",
+        FenceMode.Recent => "最近のファイルはありません",
+        _ => "ここにファイルやフォルダーをドロップ\n（元の場所からは移動しません）",
+    };
+
+    /// <summary>空のヒント。絞り込み中は「一致なし」を出す。</summary>
+    private void UpdateEmptyHint()
+    {
+        if (_items.Count == 0)
         {
-            FenceMode.Portal when string.IsNullOrEmpty(Config.PortalPath) || !Directory.Exists(Config.PortalPath)
-                => "フォルダーが見つかりません\n右クリック →「種類」から選び直してください",
-            FenceMode.Portal => "このフォルダーは空です",
-            FenceMode.Unsorted => "デスクトップは片付いています ✨",
-            _ => "ここにファイルやフォルダーをドロップ\n（元の場所からは移動しません）",
-        };
-        EmptyHint.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            EmptyHint.Text = DefaultEmptyHint();
+            EmptyHint.Visibility = Visibility.Visible;
+        }
+        else if (_view.IsEmpty)
+        {
+            EmptyHint.Text = _searchText.Length == 0
+                ? DefaultEmptyHint()
+                : $"「{_searchText}」に一致する項目がありません";
+            EmptyHint.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            EmptyHint.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 検索（Ctrl+F）
+    // ------------------------------------------------------------------
+
+    private bool MatchesSearch(FenceItem item)
+    {
+        if (_searchText.Length == 0) return true;
+        var compare = System.Globalization.CultureInfo.CurrentCulture.CompareInfo;
+        const System.Globalization.CompareOptions options =
+            System.Globalization.CompareOptions.IgnoreCase
+            | System.Globalization.CompareOptions.IgnoreKanaType
+            | System.Globalization.CompareOptions.IgnoreWidth;
+        return compare.IndexOf(item.Name, _searchText, options) >= 0;
+    }
+
+    public void ToggleSearch()
+    {
+        if (SearchBar.IsVisible)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            return;
+        }
+        SearchBar.Visibility = Visibility.Visible;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void CloseSearch()
+    {
+        SearchBar.Visibility = Visibility.Collapsed;
+        if (SearchBox.Text.Length > 0) SearchBox.Text = "";
+        _searchText = "";
+        _view.Refresh();
+        UpdateEmptyHint();
+        ItemsList.Focus();
+    }
+
+    private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        _searchText = SearchBox.Text.Trim();
+        _view.Refresh();
+        if (ItemsList.SelectedItem is FenceItem selected && _view.Contains(selected))
+        {
+            ItemsList.ScrollIntoView(selected);
+        }
+        else
+        {
+            ItemsList.SelectedItem = _view.Cast<FenceItem>().FirstOrDefault();
+            if (ItemsList.SelectedItem is FenceItem first) ItemsList.ScrollIntoView(first);
+        }
+        UpdateEmptyHint();
+    }
+
+    private void OnSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            CloseSearch();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            if (ItemsList.SelectedItem is FenceItem item) OpenItem(item);
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Down or Key.Up)
+        {
+            MoveSelection(e.Key == Key.Down ? 1 : -1);
+            e.Handled = true;
+        }
+    }
+
+    private void OnCloseSearch(object sender, RoutedEventArgs e) => CloseSearch();
+
+    private void MoveSelection(int delta)
+    {
+        int count = ItemsList.Items.Count;
+        if (count == 0) return;
+        ItemsList.SelectedIndex = Math.Clamp(ItemsList.SelectedIndex + delta, 0, count - 1);
+        if (ItemsList.SelectedItem is FenceItem item) ItemsList.ScrollIntoView(item);
     }
 
     private static IEnumerable<string> UnsortedPaths()
@@ -614,6 +804,7 @@ public partial class FenceWindow : Window
     {
         FenceMode.Portal when !string.IsNullOrEmpty(Config.PortalPath) => new[] { Config.PortalPath! },
         FenceMode.Unsorted => new[] { FolderListing.UserDesktop, FolderListing.CommonDesktop },
+        FenceMode.Recent => FolderListing.RecentRoots(),
         _ => Array.Empty<string>(),
     };
 
@@ -677,6 +868,7 @@ public partial class FenceWindow : Window
         if (Config.Mode != FenceMode.Shortcuts) return;
         var paths = ItemsList.SelectedItems.Cast<FenceItem>().Select(i => i.Path).ToList();
         if (paths.Count == 0) return;
+        App.Current.RecordRemoval(Config, paths);
         RemovePaths(paths);
         App.Current.ExcludeFromRules(paths); // 手で外したものは自動振り分けで戻さない
         App.Current.OnItemsChanged();
@@ -695,6 +887,12 @@ public partial class FenceWindow : Window
         else if (mode == FenceMode.Unsorted && Config.Mode != FenceMode.Unsorted)
         {
             Config.Title = "未整理";
+        }
+        else if (mode == FenceMode.Recent)
+        {
+            Config.Title = "最近のファイル";
+            Config.SortKey = SortKey.Modified;
+            Config.SortDescending = true;
         }
         else if (mode == FenceMode.Remote)
         {
@@ -717,17 +915,29 @@ public partial class FenceWindow : Window
     // タイトルバー
     // ------------------------------------------------------------------
 
+    /// <summary>まとめ移動の選択状態を表示する。</summary>
+    public void SetGroupSelected(bool on) =>
+        GroupRing.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+
     private void OnTitleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (TitleEdit.IsVisible) return;
+        if (e.ClickCount == 1 && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            App.Current.ToggleGroup(this);
+            e.Handled = true;
+            return;
+        }
         if (e.ClickCount == 2)
         {
             ToggleRollup();
             e.Handled = true;
             return;
         }
+        App.Current.BeginGroupDrag(this);
         try { DragMove(); }
         catch (InvalidOperationException) { }
+        finally { App.Current.EndGroupDrag(); }
     }
 
     public void BeginRename()
@@ -740,6 +950,7 @@ public partial class FenceWindow : Window
         TitleEdit.Visibility = Visibility.Visible;
         TitleEdit.Focus();
         TitleEdit.SelectAll();
+        ApplyPrivacy();
     }
 
     private void EndRename(bool commit)
@@ -819,9 +1030,42 @@ public partial class FenceWindow : Window
     private void OnListMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (ItemFromSource(e.OriginalSource) is not { } item) return;
+        OpenItemFromMouse(item);
+    }
+
+    /// <summary>シングルクリックで開く設定のとき、ドラッグにならなかったクリックで開く。</summary>
+    private void OnListPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var item = _dragItem;
+        _dragItem = null;
+        if (!App.Current.Config.SingleClickOpen || item is null) return;
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        if (ItemFromSource(e.OriginalSource) != item) return;
+        OpenItemFromMouse(item);
+    }
+
+    /// <summary>ダブルクリック相当の時間内に同じ項目を二重に開かない。</summary>
+    private void OpenItemFromMouse(FenceItem item)
+    {
+        var now = DateTime.UtcNow;
+        if (string.Equals(_lastMouseOpenPath, item.Path, StringComparison.OrdinalIgnoreCase)
+            && (now - _lastMouseOpenAt).TotalMilliseconds < NativeMethods.GetDoubleClickTime())
+            return;
+        _lastMouseOpenPath = item.Path;
+        _lastMouseOpenAt = now;
+        OpenItem(item);
+    }
+
+    /// <summary>このフェンスの項目を開く（ローカル／SSH を問わず）。</summary>
+    public void OpenItem(FenceItem item)
+    {
         if (IsRemote) RemoteOpen(item);
         else ShellActions.Open(item.Path);
     }
+
+    /// <summary>検索・コマンドパレット用（今のページの項目）。</summary>
+    public IEnumerable<FenceItem> VisibleItems => _items;
+    public string PageTitle => Config.Title;
 
     /// <summary>
     /// Tab / Shift+Tab を先に拾う。ListBox の既定のフォーカス移動より前に処理しないと、
@@ -829,6 +1073,24 @@ public partial class FenceWindow : Window
     /// </summary>
     private void OnListPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.F && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            ToggleSearch();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Z && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            App.Current.UndoLast();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape && SearchBar.IsVisible)
+        {
+            CloseSearch();
+            e.Handled = true;
+            return;
+        }
         if (e.Key != Key.Tab) return;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
@@ -847,6 +1109,25 @@ public partial class FenceWindow : Window
 
     private void OnListKeyDown(object sender, KeyEventArgs e)
     {
+        // ナビゲーションしたらタイプアヘッドはやり直し
+        if (e.Key is Key.Up or Key.Down or Key.Left or Key.Right
+            or Key.Home or Key.End or Key.PageUp or Key.PageDown)
+            _typeBuffer = "";
+
+        if (e.Key == Key.Back && _typeBuffer.Length > 0)
+        {
+            _typeBuffer = _typeBuffer[..^1];
+            if (_typeBuffer.Length > 0 && FindByPrefix(_typeBuffer) is { } back) SelectAndReveal(back);
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape && _typeBuffer.Length > 0)
+        {
+            _typeBuffer = "";
+            e.Handled = true;
+            return;
+        }
+
         if (IsRemote)
         {
             if (HandleRemoteKey(e)) e.Handled = true;
@@ -885,7 +1166,7 @@ public partial class FenceWindow : Window
     /// </summary>
     private void OnListTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (string.IsNullOrEmpty(e.Text)) return;
+        if (string.IsNullOrEmpty(e.Text) || char.IsControl(e.Text[0])) return;
         // Ctrl / Alt 付きはショートカットなので拾わない（Shift は大文字入力に使える）
         if ((Keyboard.Modifiers & ~ModifierKeys.Shift) != ModifierKeys.None) return;
 
@@ -894,23 +1175,31 @@ public partial class FenceWindow : Window
         if (newBuffer) _typeBuffer = "";
         _typeBufferAt = now;
 
-        // 同じ 1 文字の繰り返しは「次の候補」
-        if (!newBuffer && _typeBuffer.Length == 1 && e.Text.Length == 1 && _typeBuffer[0] == e.Text[0])
+        // まず「今の文字列＋新しい文字」で前方一致を探す（app → Apple も打てる）
+        var extended = _typeBuffer + e.Text;
+        var match = FindByPrefix(extended, afterCurrent: newBuffer);
+        var nextBuffer = extended;
+
+        // 同じ 1 文字の連打で、その文字を含む次の候補へ（aa に一致が無い場合だけ）
+        if (match is null && !newBuffer && _typeBuffer.Length == 1
+            && e.Text.Length == 1 && _typeBuffer[0] == e.Text[0])
         {
-            if (FindByPrefix(_typeBuffer, afterCurrent: true) is { } next) SelectAndReveal(next);
-            e.Handled = true;
-            return;
+            match = FindByPrefix(_typeBuffer, afterCurrent: true);
+            nextBuffer = _typeBuffer;
         }
 
-        _typeBuffer += e.Text;
-        var match = FindByPrefix(_typeBuffer, afterCurrent: newBuffer);
-        if (match is null && _typeBuffer.Length > 1)
+        // それでも無ければ、最後の文字で探し直す
+        if (match is null && extended.Length > 1)
         {
-            // 「ab」に合うものが無ければ、最後の文字で探し直す
-            _typeBuffer = e.Text;
-            match = FindByPrefix(_typeBuffer);
+            nextBuffer = e.Text;
+            match = FindByPrefix(nextBuffer);
         }
-        if (match is not null) SelectAndReveal(match);
+
+        if (match is not null)
+        {
+            _typeBuffer = nextBuffer;
+            SelectAndReveal(match);
+        }
         e.Handled = true;
     }
 
@@ -943,13 +1232,29 @@ public partial class FenceWindow : Window
         ItemsList.SelectedItem = item;
         ItemsList.ScrollIntoView(item);
         if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container)
+        {
             container.BringIntoView();
+            // 矢印キーの起点は「フォーカス中のコンテナ」。ListBox 本体にフォーカスを残すと
+            // 最初の項目から移動してしまうため、選択した項目へフォーカスも移す。
+            container.Focus();
+        }
+    }
+
+    private void FocusSelectedItem()
+    {
+        ItemsList.UpdateLayout(); // ScrollIntoView でコンテナが作られるのを待つ
+        if (ItemsList.SelectedItem is FenceItem item
+            && ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container
+            && container.Focus())
+            return;
+        ItemsList.Focus();
     }
 
     /// <summary>矢印キーで選択が画面外へ進んだときも、必ず見える位置までスクロールする。</summary>
     private void OnListSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!ItemsList.IsKeyboardFocusWithin) return;
+        if (InputManager.Current.MostRecentInputDevice is not KeyboardDevice) return;
         if (ItemsList.SelectedItem is FenceItem item)
             ItemsList.ScrollIntoView(item);
     }
@@ -962,12 +1267,20 @@ public partial class FenceWindow : Window
             _hoverExpanded = true;
             ApplyRollup();
         }
-        Activate();
-        ItemsList.Focus();
+        if (!Activate()) Log.Info("FocusList: Activate failed");
         if (ItemsList.SelectedItem is FenceItem selected)
+        {
             ItemsList.ScrollIntoView(selected);
+            FocusSelectedItem();
+        }
         else if (_items.Count > 0)
+        {
             SelectAndReveal(_items[0]);
+        }
+        else
+        {
+            ItemsList.Focus();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1070,6 +1383,8 @@ public partial class FenceWindow : Window
 
         if (Config.Mode == FenceMode.Unsorted)
         {
+            if (App.Current.Config.FindPage(source!) is { } from)
+                App.Current.RecordRemoval(from, paths);
             App.Current.RemoveFromPage(source!, paths);
             App.Current.ExcludeFromRules(paths); // 未整理に戻したものは自動振り分けで戻さない
             App.Current.OnItemsChanged();
@@ -1103,6 +1418,8 @@ public partial class FenceWindow : Window
         }
         else
         {
+            if (source != null)
+                App.Current.RecordMove(source, Config, paths);
             foreach (var p in paths)
             {
                 if (list.Contains(p, PathComparer)) continue;
@@ -1284,8 +1601,8 @@ public partial class FenceWindow : Window
     {
         menu.PlacementTarget = this;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
-        menu.Opened += (_, _) => _menuOpen = true;
-        menu.Closed += (_, _) => { _menuOpen = false; ScheduleCollapse(); };
+        menu.Opened += (_, _) => { _menuOpen = true; ApplyPrivacy(); };
+        menu.Closed += (_, _) => { _menuOpen = false; ScheduleCollapse(); ApplyPrivacy(); };
         menu.IsOpen = true;
     }
 
@@ -1404,11 +1721,14 @@ public partial class FenceWindow : Window
         m.Items.Add(color);
         var design = AddItem(m, "外観の設定…", () => StyleEditorWindow.ShowFor(this));
         design.FontWeight = FontWeights.SemiBold;
+        AddItem(m, App.Current.IsGroupSelected(this) ? "まとめ移動から外す" : "まとめ移動に追加（Ctrl+Shift+クリック）",
+            () => App.Current.ToggleGroup(this));
 
         var kind = new MenuItem { Header = "種類" };
         AddMode(kind, "ショートカット（ドロップしたものを並べる）", FenceMode.Shortcuts);
         AddMode(kind, Config.Mode == FenceMode.Portal ? "フォルダーポータル（フォルダーを変更…）" : "フォルダーポータル…", FenceMode.Portal);
         AddMode(kind, "未整理（どのフェンスにも無いデスクトップ項目）", FenceMode.Unsorted);
+        AddMode(kind, "最近のファイル（仮想）", FenceMode.Recent);
         AddMode(kind, Config.Mode == FenceMode.Remote ? "SSH（接続先を変更…）" : "SSH（リモートのフォルダー）…", FenceMode.Remote);
         m.Items.Add(kind);
 

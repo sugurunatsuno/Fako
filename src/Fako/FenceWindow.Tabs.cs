@@ -146,6 +146,7 @@ public partial class FenceWindow
     public void SwitchTo(FenceConfig page)
     {
         if (page == Config || !Pages.Contains(page)) return;
+        if (SearchBar.IsVisible) CloseSearch();
         EndRename(true);
         LeavePage();
         Config = page;
@@ -156,6 +157,7 @@ public partial class FenceWindow
         TitleText.Text = Config.Title;
         Reload();
         App.Current.SaveSoon();
+        ApplyPrivacy();
     }
 
     /// <summary>今のページの表示や監視を片付ける（SSH の接続は残す）。</summary>
