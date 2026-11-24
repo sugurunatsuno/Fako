@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using Fako.Interop;
 using Fako.Models;
 using Microsoft.Win32;
@@ -140,6 +141,94 @@ public partial class SettingsWindow : Window
         _fences.Clear();
         foreach (var f in fresh) _fences.Add(f);
         foreach (var r in _rules) r.Refresh();
+    }
+
+    private static readonly (FileCategory Category, string FenceTitle)[] PresetCategories =
+    {
+        (FileCategory.Image, "画像"),
+        (FileCategory.Video, "動画"),
+        (FileCategory.Audio, "音声"),
+        (FileCategory.Document, "ドキュメント"),
+        (FileCategory.Archive, "圧縮ファイル"),
+        (FileCategory.Program, "プログラム"),
+        (FileCategory.Folder, "フォルダー"),
+        (FileCategory.Shortcut, "ショートカット"),
+    };
+
+    private static string ShortCategory(FileCategory c) => c switch
+    {
+        FileCategory.Image => "画像",
+        FileCategory.Video => "動画",
+        FileCategory.Audio => "音声",
+        FileCategory.Document => "ドキュメント",
+        FileCategory.Archive => "圧縮ファイル",
+        FileCategory.Program => "プログラム",
+        FileCategory.Folder => "フォルダー",
+        FileCategory.Shortcut => "ショートカット",
+        _ => c.ToString(),
+    };
+
+    private void OnPresetMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu();
+        var recommended = new MenuItem { Header = "おすすめセットを追加（画像・動画・音声・ドキュメント・圧縮・プログラム）" };
+        recommended.Click += (_, _) => AddRecommendedPresets();
+        menu.Items.Add(recommended);
+        menu.Items.Add(new Separator());
+        foreach (var (category, title) in PresetCategories)
+        {
+            var item = new MenuItem { Header = $"{ShortCategory(category)} → 「{title}」" };
+            item.Click += (_, _) => AddPreset(category, title);
+            menu.Items.Add(item);
+        }
+        menu.PlacementTarget = (Button)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void AddRecommendedPresets()
+    {
+        if (MessageBox.Show(this,
+                "画像・動画・音声・ドキュメント・圧縮ファイル・プログラムのフェンスを作り（同名があれば再利用）、ルールを追加します。\n" +
+                "フェンスはすぐに作成されます。よろしいですか？",
+                "Fako", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+
+        int added = 0;
+        foreach (var (category, title) in PresetCategories.Take(6))
+            if (AddPreset(category, title)) added++;
+
+        if (AutoSortBox.IsChecked != true &&
+            MessageBox.Show(this, "自動振り分けがオフです。プリセットを使うにはオンにする必要があります。オンにしますか？",
+                "Fako", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            AutoSortBox.IsChecked = true;
+
+        RunResultText.Text = added == 0
+            ? "プリセットはすでに追加されています"
+            : $"{added} 件のプリセットを追加しました（OK／適用で保存）";
+    }
+
+    private bool AddPreset(FileCategory category, string title)
+    {
+        var fence = App.Current.EnsureShortcutFence(title);
+        var rule = new SortRule
+        {
+            Name = $"{ShortCategory(category)}を「{title}」へ",
+            Kind = RuleKind.Category,
+            Pattern = category.ToString(),
+            TargetFenceId = fence.Id,
+        };
+        if (_rules.Any(r => r.Kind == rule.Kind && r.Pattern == rule.Pattern
+                            && r.TargetFenceId == rule.TargetFenceId))
+            return false;
+
+        RefreshFenceOptions();
+        var vm = NewViewModel(rule);
+        _rules.Add(vm);
+        RuleList.SelectedItem = vm;
+        RuleList.ScrollIntoView(vm);
+        UpdateRuleEditor();
+        return true;
     }
 
     private void OnRulePropertyChanged(object? sender, PropertyChangedEventArgs e)

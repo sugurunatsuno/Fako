@@ -118,6 +118,7 @@
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
                                 <Button Content="追加" MinWidth="64" Click="OnAddRule" />
+                                <Button Content="プリセット…" MinWidth="96" Margin="6,0,0,0" Click="OnPresetMenu" />
                                 <Button x:Name="RemoveRuleButton" Content="削除" MinWidth="64" Margin="6,0,0,0" Click="OnRemoveRule" />
                                 <Button x:Name="UpButton" Content="↑" MinWidth="40" Margin="6,0,0,0" Click="OnMoveUp" ToolTip="上へ（優先）" />
                                 <Button x:Name="DownButton" Content="↓" MinWidth="40" Margin="6,0,0,0" Click="OnMoveDown" ToolTip="下へ" />

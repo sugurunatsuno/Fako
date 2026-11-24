@@ -197,6 +197,17 @@ public partial class App : Application
         return w;
     }
 
+    /// <summary>指定したタイトルのショートカットフェンスを再利用するか、新しく作る（プリセット用）。</summary>
+    public FenceConfig EnsureShortcutFence(string title)
+    {
+        var existing = Config.AllPages().FirstOrDefault(p =>
+            p.Mode == FenceMode.Shortcuts &&
+            string.Equals(p.Title, title, StringComparison.CurrentCultureIgnoreCase));
+        if (existing != null) return existing;
+        var w = NewFence(FenceMode.Shortcuts, title: title, rename: false);
+        return w.Host;
+    }
+
     /// <summary>そのページ（タブを含む）を持っているフェンスのウィンドウ。</summary>
     public FenceWindow? FindFence(string pageId) => _windows.FirstOrDefault(w => w.Pages.Any(p => p.Id == pageId));
 
