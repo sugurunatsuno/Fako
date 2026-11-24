@@ -173,6 +173,31 @@ public partial class App : Application
     /// <summary>そのページ（タブを含む）を持っているフェンスのウィンドウ。</summary>
     public FenceWindow? FindFence(string pageId) => _windows.FirstOrDefault(w => w.Pages.Any(p => p.Id == pageId));
 
+    /// <summary>
+    /// Tab / Shift+Tab: 左右に隣り合うフェンスへフォーカスを移す。
+    /// 同じ行（縦に重なる）ものを優先し、無ければ左右にある最も近いもの。端では折り返さない。
+    /// </summary>
+    public void FocusAdjacentFence(FenceWindow from, int direction)
+    {
+        var candidates = _windows
+            .Where(w => w != from && w.IsVisible && w.Handle != IntPtr.Zero)
+            .Select(w => (Window: w, SameRow: VerticalOverlap(from, w)))
+            .Where(x => direction > 0
+                ? x.Window.Left >= from.Left + from.ActualWidth - 1
+                : x.Window.Left + x.Window.ActualWidth <= from.Left + 1)
+            .ToList();
+        if (candidates.Count == 0) return;
+
+        var pool = candidates.Any(x => x.SameRow) ? candidates.Where(x => x.SameRow) : candidates;
+        var next = direction > 0
+            ? pool.OrderBy(x => x.Window.Left).First()
+            : pool.OrderByDescending(x => x.Window.Left + x.Window.ActualWidth).First();
+        next.Window.FocusList();
+    }
+
+    private static bool VerticalOverlap(FenceWindow a, FenceWindow b) =>
+        a.Top < b.Top + b.ActualHeight && b.Top < a.Top + a.ActualHeight;
+
     public IReadOnlyList<FenceWindow> FenceWindows => _windows;
 
     /// <summary>ページからアイテムを外す（ドラッグで別のフェンス・タブへ移したとき）。</summary>

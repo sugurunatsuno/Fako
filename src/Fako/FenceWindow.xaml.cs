@@ -103,6 +103,11 @@ public partial class FenceWindow : Window
     private Point _dragStart;
     private FenceItem? _dragItem;
 
+    /// <summary>タイプアヘッド: 直近に入力した文字列と、その最後の入力時刻。</summary>
+    private string _typeBuffer = "";
+    private DateTime _typeBufferAt;
+    private static readonly TimeSpan TypeBufferTimeout = TimeSpan.FromMilliseconds(900);
+
     public FenceWindow(FenceConfig config)
     {
         InitializeComponent();
@@ -140,6 +145,21 @@ public partial class FenceWindow : Window
         SizeChanged += OnSizeChanged;
         MouseEnter += (_, _) => HoverExpand();
         MouseLeave += (_, _) => ScheduleCollapse();
+        Activated += (_, _) =>
+        {
+            // フェンスをクリックしたら、そのまま矢印キー・文字入力で操作できるようにする
+            if (!ItemsList.IsKeyboardFocusWithin && !TitleEdit.IsVisible)
+                ItemsList.Focus();
+        };
+        LostKeyboardFocus += (_, _) =>
+        {
+            _typeBuffer = "";
+            if (Host.RolledUp && !IsMouseOver && !_menuOpen)
+            {
+                _hoverExpanded = false;
+                ApplyRollup();
+            }
+        };
         Closed += (_, _) =>
         {
             DisposeWatchers();
@@ -547,6 +567,7 @@ public partial class FenceWindow : Window
 
     public void Reload()
     {
+        _typeBuffer = "";
         if (IsRemote)
         {
             ReloadRemote();
@@ -758,6 +779,7 @@ public partial class FenceWindow : Window
 
     private void OnListPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        _typeBuffer = "";
         _dragStart = e.GetPosition(this);
         _dragItem = ItemFromSource(e.OriginalSource);
         if (_dragItem == null && e.OriginalSource is not System.Windows.Controls.Primitives.Thumb)
@@ -801,14 +823,30 @@ public partial class FenceWindow : Window
         else ShellActions.Open(item.Path);
     }
 
-    private void OnListKeyDown(object sender, KeyEventArgs e)
+    /// <summary>
+    /// Tab / Shift+Tab を先に拾う。ListBox の既定のフォーカス移動より前に処理しないと、
+    /// 同じフェンス内の項目間移動になってしまう。
+    /// </summary>
+    private void OnListPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Tab && Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && HasTabs)
+        if (e.Key != Key.Tab) return;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
-            SwitchRelative(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1);
-            e.Handled = true;
+            if (HasTabs)
+            {
+                SwitchRelative(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1);
+                e.Handled = true;
+            }
             return;
         }
+        // タブなしの Tab / Shift+Tab は、左右に隣り合うフェンスへ（端では折り返さない）
+        int direction = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1;
+        App.Current.FocusAdjacentFence(this, direction);
+        e.Handled = true;
+    }
+
+    private void OnListKeyDown(object sender, KeyEventArgs e)
+    {
         if (IsRemote)
         {
             if (HandleRemoteKey(e)) e.Handled = true;
@@ -839,6 +877,97 @@ public partial class FenceWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    /// <summary>
+    /// タイプアヘッド: 文字を打つと名前が前方一致する項目へ移動する。
+    /// 同じ文字を続けて打つと、その文字で始まる次の項目へ（エクスプローラー風）。
+    /// </summary>
+    private void OnListTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.Text)) return;
+        // Ctrl / Alt 付きはショートカットなので拾わない（Shift は大文字入力に使える）
+        if ((Keyboard.Modifiers & ~ModifierKeys.Shift) != ModifierKeys.None) return;
+
+        var now = DateTime.UtcNow;
+        bool newBuffer = _typeBuffer.Length == 0 || now - _typeBufferAt > TypeBufferTimeout;
+        if (newBuffer) _typeBuffer = "";
+        _typeBufferAt = now;
+
+        // 同じ 1 文字の繰り返しは「次の候補」
+        if (!newBuffer && _typeBuffer.Length == 1 && e.Text.Length == 1 && _typeBuffer[0] == e.Text[0])
+        {
+            if (FindByPrefix(_typeBuffer, afterCurrent: true) is { } next) SelectAndReveal(next);
+            e.Handled = true;
+            return;
+        }
+
+        _typeBuffer += e.Text;
+        var match = FindByPrefix(_typeBuffer, afterCurrent: newBuffer);
+        if (match is null && _typeBuffer.Length > 1)
+        {
+            // 「ab」に合うものが無ければ、最後の文字で探し直す
+            _typeBuffer = e.Text;
+            match = FindByPrefix(_typeBuffer);
+        }
+        if (match is not null) SelectAndReveal(match);
+        e.Handled = true;
+    }
+
+    /// <summary>名前が prefix で始まる項目を探す。afterCurrent なら選択中の次から（末尾は先頭へ）。</summary>
+    private FenceItem? FindByPrefix(string prefix, bool afterCurrent = false)
+    {
+        if (_items.Count == 0 || prefix.Length == 0) return null;
+        var compare = System.Globalization.CultureInfo.CurrentCulture.CompareInfo;
+        const System.Globalization.CompareOptions options =
+            System.Globalization.CompareOptions.IgnoreCase
+            | System.Globalization.CompareOptions.IgnoreKanaType
+            | System.Globalization.CompareOptions.IgnoreWidth;
+
+        int start = 0;
+        if (afterCurrent && ItemsList.SelectedItem is FenceItem current)
+        {
+            int index = _items.IndexOf(current);
+            if (index >= 0) start = index + 1;
+        }
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var item = _items[(start + i) % _items.Count];
+            if (compare.IndexOf(item.Name, prefix, options) == 0) return item;
+        }
+        return null;
+    }
+
+    private void SelectAndReveal(FenceItem item)
+    {
+        ItemsList.SelectedItem = item;
+        ItemsList.ScrollIntoView(item);
+        if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container)
+            container.BringIntoView();
+    }
+
+    /// <summary>矢印キーで選択が画面外へ進んだときも、必ず見える位置までスクロールする。</summary>
+    private void OnListSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ItemsList.IsKeyboardFocusWithin) return;
+        if (ItemsList.SelectedItem is FenceItem item)
+            ItemsList.ScrollIntoView(item);
+    }
+
+    /// <summary>他のフェンスからキーボードで移ってきたとき、このフェンスにフォーカスを渡す。</summary>
+    public void FocusList()
+    {
+        if (Host.RolledUp && !_hoverExpanded)
+        {
+            _hoverExpanded = true;
+            ApplyRollup();
+        }
+        Activate();
+        ItemsList.Focus();
+        if (ItemsList.SelectedItem is FenceItem selected)
+            ItemsList.ScrollIntoView(selected);
+        else if (_items.Count > 0)
+            SelectAndReveal(_items[0]);
     }
 
     // ------------------------------------------------------------------

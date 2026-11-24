@@ -82,6 +82,14 @@
                                 <Setter TargetName="Bd" Property="Background" Value="#4D9CC8FF" />
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="#809CC8FF" />
                             </Trigger>
+                            <!-- キーボード操作中は、選択中の項目を少し強く見せる -->
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True" />
+                                    <Condition Property="Selector.IsSelectionActive" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#FFB8D9FF" />
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -219,71 +227,91 @@
         </Style>
     </Window.Resources>
 
-    <Border x:Name="Root" CornerRadius="8" BorderThickness="1" BorderBrush="#40FFFFFF" Background="#A0202428">
-        <DockPanel>
-            <Border x:Name="TitleBar" DockPanel.Dock="Top" Height="26" CornerRadius="7,7,0,0"
-                    Background="#1AFFFFFF" MouseLeftButtonDown="OnTitleMouseLeftButtonDown">
-                <Grid>
-                    <TextBlock x:Name="TitleText" Margin="12,0" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Foreground="White" FontSize="13" FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis"
-                               Effect="{Binding ItemTextEffect, RelativeSource={RelativeSource AncestorType=Window}}" />
-                    <!-- タブ（ページが 2 枚以上のときだけ、タイトルの代わりに並べる） -->
-                    <UniformGrid x:Name="TabStrip" Rows="1" Visibility="Collapsed" Margin="4,3,4,0" />
-                    <TextBox x:Name="TitleEdit" Visibility="Collapsed" Margin="8,3" Padding="2,0"
-                             VerticalContentAlignment="Center" FontSize="12"
-                             KeyDown="OnTitleEditKeyDown" LostKeyboardFocus="OnTitleEditLostFocus" />
+    <Grid>
+        <Border x:Name="Root" CornerRadius="8" BorderThickness="1" BorderBrush="#40FFFFFF" Background="#A0202428">
+            <DockPanel>
+                <Border x:Name="TitleBar" DockPanel.Dock="Top" Height="26" CornerRadius="7,7,0,0"
+                        Background="#1AFFFFFF" MouseLeftButtonDown="OnTitleMouseLeftButtonDown">
+                    <Grid>
+                        <TextBlock x:Name="TitleText" Margin="12,0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="White" FontSize="13" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Effect="{Binding ItemTextEffect, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <!-- タブ（ページが 2 枚以上のときだけ、タイトルの代わりに並べる） -->
+                        <UniformGrid x:Name="TabStrip" Rows="1" Visibility="Collapsed" Margin="4,3,4,0" />
+                        <TextBox x:Name="TitleEdit" Visibility="Collapsed" Margin="8,3" Padding="2,0"
+                                 VerticalContentAlignment="Center" FontSize="12"
+                                 KeyDown="OnTitleEditKeyDown" LostKeyboardFocus="OnTitleEditLostFocus" />
+                    </Grid>
+                </Border>
+
+                <Grid x:Name="ContentArea">
+                    <DockPanel>
+                        <!-- SSH フェンス: 場所のバー（上の階層へ・現在のフォルダー・更新） -->
+                        <Border x:Name="RemoteBar" DockPanel.Dock="Top" Visibility="Collapsed" Margin="6,4,6,0" Height="24"
+                                CornerRadius="4" Background="#14FFFFFF">
+                            <DockPanel>
+                                <Button x:Name="RemoteUpButton" DockPanel.Dock="Left" Content="↑" ToolTip="上の階層へ (Backspace)"
+                                        Style="{StaticResource BarButton}" Click="OnRemoteUp" />
+                                <Button DockPanel.Dock="Right" Content="⟳" ToolTip="最新の情報に更新 (F5)"
+                                        Style="{StaticResource BarButton}" Click="OnRemoteRefresh" />
+                                <TextBlock x:Name="RemotePathText" Style="{StaticResource SubText}" Margin="6,0" />
+                            </DockPanel>
+                        </Border>
+                        <!-- SSH フェンス: 状態（接続中・転送の進み具合・エラー） -->
+                        <TextBlock x:Name="RemoteStatus" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="8,2,8,4"
+                                   Style="{StaticResource SubText}" />
+
+                        <Border x:Name="DetailsHeader" DockPanel.Dock="Top" Visibility="Collapsed" Height="22"
+                                Margin="7,2,13,0" BorderBrush="#33FFFFFF" BorderThickness="0,0,0,1">
+                            <DockPanel>
+                                <Button x:Name="HeaderSize" DockPanel.Dock="Right" Tag="Size" Click="OnHeaderClick"
+                                        Style="{StaticResource HeaderButton}" HorizontalContentAlignment="Right"
+                                        Width="{Binding SizeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <Button x:Name="HeaderType" DockPanel.Dock="Right" Tag="Type" Click="OnHeaderClick"
+                                        Style="{StaticResource HeaderButton}"
+                                        Width="{Binding TypeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <Button x:Name="HeaderDate" DockPanel.Dock="Right" Tag="Modified" Click="OnHeaderClick"
+                                        Style="{StaticResource HeaderButton}"
+                                        Width="{Binding DateColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <Button x:Name="HeaderName" Tag="Name" Click="OnHeaderClick" Style="{StaticResource HeaderButton}" />
+                            </DockPanel>
+                        </Border>
+
+                        <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="4"
+                                 SelectionMode="Extended" Focusable="True"
+                                 VirtualizingPanel.ScrollUnit="Pixel"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
+                                 PreviewMouseMove="OnListPreviewMouseMove"
+                                 MouseDoubleClick="OnListMouseDoubleClick"
+                                 PreviewTextInput="OnListTextInput"
+                                 SelectionChanged="OnListSelectionChanged"
+                                 PreviewKeyDown="OnListPreviewKeyDown"
+                                 KeyDown="OnListKeyDown" />
+                    </DockPanel>
+                    <TextBlock x:Name="EmptyHint" IsHitTestVisible="False" Margin="16"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                               TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="12"
+                               Effect="{StaticResource TextShadow}" />
                 </Grid>
-            </Border>
+            </DockPanel>
+        </Border>
 
-            <Grid x:Name="ContentArea">
-                <DockPanel>
-                    <!-- SSH フェンス: 場所のバー（上の階層へ・現在のフォルダー・更新） -->
-                    <Border x:Name="RemoteBar" DockPanel.Dock="Top" Visibility="Collapsed" Margin="6,4,6,0" Height="24"
-                            CornerRadius="4" Background="#14FFFFFF">
-                        <DockPanel>
-                            <Button x:Name="RemoteUpButton" DockPanel.Dock="Left" Content="↑" ToolTip="上の階層へ (Backspace)"
-                                    Style="{StaticResource BarButton}" Click="OnRemoteUp" />
-                            <Button DockPanel.Dock="Right" Content="⟳" ToolTip="最新の情報に更新 (F5)"
-                                    Style="{StaticResource BarButton}" Click="OnRemoteRefresh" />
-                            <TextBlock x:Name="RemotePathText" Style="{StaticResource SubText}" Margin="6,0" />
-                        </DockPanel>
-                    </Border>
-                    <!-- SSH フェンス: 状態（接続中・転送の進み具合・エラー） -->
-                    <TextBlock x:Name="RemoteStatus" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="8,2,8,4"
-                               Style="{StaticResource SubText}" />
-
-                    <Border x:Name="DetailsHeader" DockPanel.Dock="Top" Visibility="Collapsed" Height="22"
-                            Margin="7,2,13,0" BorderBrush="#33FFFFFF" BorderThickness="0,0,0,1">
-                        <DockPanel>
-                            <Button x:Name="HeaderSize" DockPanel.Dock="Right" Tag="Size" Click="OnHeaderClick"
-                                    Style="{StaticResource HeaderButton}" HorizontalContentAlignment="Right"
-                                    Width="{Binding SizeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
-                            <Button x:Name="HeaderType" DockPanel.Dock="Right" Tag="Type" Click="OnHeaderClick"
-                                    Style="{StaticResource HeaderButton}"
-                                    Width="{Binding TypeColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
-                            <Button x:Name="HeaderDate" DockPanel.Dock="Right" Tag="Modified" Click="OnHeaderClick"
-                                    Style="{StaticResource HeaderButton}"
-                                    Width="{Binding DateColWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
-                            <Button x:Name="HeaderName" Tag="Name" Click="OnHeaderClick" Style="{StaticResource HeaderButton}" />
-                        </DockPanel>
-                    </Border>
-
-                    <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="4"
-                             SelectionMode="Extended" Focusable="True"
-                             VirtualizingPanel.ScrollUnit="Pixel"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
-                             PreviewMouseMove="OnListPreviewMouseMove"
-                             MouseDoubleClick="OnListMouseDoubleClick"
-                             KeyDown="OnListKeyDown" />
-                </DockPanel>
-                <TextBlock x:Name="EmptyHint" IsHitTestVisible="False" Margin="16"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
-                           TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="12"
-                           Effect="{StaticResource TextShadow}" />
-            </Grid>
-        </DockPanel>
-    </Border>
+        <!-- キーボードフォーカス中のフェンスを示す枠（レイアウトに影響しない重ね描き） -->
+        <Border x:Name="FocusRing" CornerRadius="8" BorderThickness="2" BorderBrush="#CC9CC8FF"
+                IsHitTestVisible="False">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+        </Border>
+    </Grid>
 </Window>
