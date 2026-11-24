@@ -37,14 +37,17 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | アップデート適用モード | OK（`--apply-update` で自己置換 → 1.0.0 として再起動、ハッシュ一致） |
 | ビルド（アプリ／SSH テスト／単体テスト） | OK（0 warning / 0 error） |
 | 1.0.0 のインストール（Release 資産） | OK（SHA256 一致、1.0.0 で起動） |
+| 1.0.1 のインストール（Release 資産） | OK（SHA256 一致、1.0.1 で起動） |
+| 1.0.1 の null 設定（Items / Tabs / Style） | OK（正規化して起動） |
 | 設定画面（1.0.0、アップデート項目を含む） | OK |
 
 ### CI/CD
 
 - main への push で `Build and test` が成功（ビルド＋103 テスト）。
-- 続く `Publish release` が `v1.0.0` を作成し、`Fako.exe` / `Fako.exe.sha256` / `Fako-1.0.0-win-x64.zip` をアップロード。
+- 続く `Publish release` が `v1.0.0` と `v1.0.1` を作成し、`Fako.exe` / `Fako.exe.sha256` / `Fako-<version>-win-x64.zip` をアップロード。
+- `v1.0.1` の資産をダウンロードし、SHA256 を検証してインストール（起動確認済み）。
 - 同じバージョンで再 push した場合は、既存 Release を検出して公開処理をスキップ。
-- リポジトリは public。`https://api.github.com/repos/sugurunatsuno/Fako/releases/latest` が `v1.0.0` を返すことを確認。
+- リポジトリは public。`https://api.github.com/repos/sugurunatsuno/Fako/releases/latest` が `v1.0.1` を返すことを確認。
 
 ### アップデートの実通信
 
@@ -113,4 +116,6 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 - 最近のファイルは表示専用（24 時間・最大 100 件）。
 - 元に戻せるのは「フェンスから外す」「フェンス間の移動」のみ。
 - まとめ移動は事前に選択したフェンス同士でのみ動く。
-- 検索パレットの対象は、いまフェンスに読み込まれている項目。
+- 検索パレットの対象は、いまフェンスに読み込まれているローカル項目（SSH は対象外）。
+- 異なるフォルダーの項目をまとめて右クリックした場合、シェル標準のコマンドは先頭フォルダーの項目だけに適用される。
+- SSH で大きなフォルダーをエクスプローラーへドラッグすると、準備中に UI が一時的に固まることがある。
