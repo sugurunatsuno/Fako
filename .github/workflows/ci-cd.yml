@@ -99,6 +99,8 @@ jobs:
             Write-Host "Release $env:TAG does not exist; it will be created."
             "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
+          # gh が「無い」場合に 1 を返すため、ステップ自体は成功として終える
+          exit 0
 
       - name: Publish single-file executable
         if: steps.check.outputs.exists == 'false'
