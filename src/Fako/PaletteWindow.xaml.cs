@@ -17,6 +17,7 @@ public partial class PaletteWindow : Window
 
     private readonly ObservableCollection<Entry> _shown = new();
     private List<Entry> _all = new();
+    private bool _closing;
 
     public sealed record Entry(FenceWindow Owner, FenceItem Item)
     {
@@ -29,10 +30,18 @@ public partial class PaletteWindow : Window
     {
         if (_open != null)
         {
-            _open.Close();
+            _open.CloseOnce();
             return;
         }
         ShowSingle();
+    }
+
+    /// <summary>閉じる処理は 1 回だけ。Close 後の Deactivated で再度 Close すると例外になる。</summary>
+    private void CloseOnce()
+    {
+        if (_closing) return;
+        _closing = true;
+        Close();
     }
 
     public static void ShowSingle()
@@ -61,7 +70,7 @@ public partial class PaletteWindow : Window
         InitializeComponent();
         ResultList.ItemsSource = _shown;
         Reload();
-        Deactivated += (_, _) => Close();
+        Deactivated += (_, _) => CloseOnce();
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
@@ -107,7 +116,7 @@ public partial class PaletteWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                Close();
+                CloseOnce();
                 e.Handled = true;
                 break;
             case Key.Enter:
@@ -135,8 +144,16 @@ public partial class PaletteWindow : Window
     private void OpenSelected()
     {
         if (ResultList.SelectedItem is not Entry entry) return;
-        Close();
+        CloseOnce();
         entry.Owner.OpenItem(entry.Item);
+    }
+
+    /// <summary>テスト用（FAKO_OPEN=paletteopen）: 先頭の検索結果を開く。</summary>
+    internal static void DebugOpenFirst()
+    {
+        if (_open is null) return;
+        _open.ResultList.SelectedIndex = 0;
+        _open.OpenSelected();
     }
 
     private void OnListDoubleClick(object sender, MouseButtonEventArgs e) => OpenSelected();

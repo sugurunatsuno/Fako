@@ -115,6 +115,15 @@ public partial class App : Application
             case ["palette"]:
                 Dispatcher.BeginInvoke(TogglePalette, DispatcherPriority.ApplicationIdle);
                 break;
+            case ["paletteopen"]:
+                Dispatcher.BeginInvoke(() =>
+                {
+                    TogglePalette();
+                    var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    t.Tick += (_, _) => { t.Stop(); PaletteWindow.DebugOpenFirst(); };
+                    t.Start();
+                }, DispatcherPriority.ApplicationIdle);
+                break;
             case ["search"]:
                 Dispatcher.BeginInvoke(() => _windows.FirstOrDefault()?.ToggleSearch(),
                     DispatcherPriority.ApplicationIdle);
