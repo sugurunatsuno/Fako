@@ -295,19 +295,28 @@
                             </DockPanel>
                         </Border>
 
-                        <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="4"
-                                 SelectionMode="Extended" Focusable="True"
-                                 VirtualizingPanel.ScrollUnit="Pixel"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
-                                 PreviewMouseLeftButtonUp="OnListPreviewMouseLeftButtonUp"
-                                 PreviewMouseMove="OnListPreviewMouseMove"
-                                 MouseDoubleClick="OnListMouseDoubleClick"
-                                 PreviewTextInput="OnListTextInput"
-                                 SelectionChanged="OnListSelectionChanged"
-                                 PreviewKeyDown="OnListPreviewKeyDown"
-                                 KeyDown="OnListKeyDown" />
+                        <Grid>
+                            <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="4"
+                                     SelectionMode="Extended" Focusable="True"
+                                     VirtualizingPanel.ScrollUnit="Pixel"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     PreviewMouseLeftButtonDown="OnListPreviewMouseLeftButtonDown"
+                                     PreviewMouseLeftButtonUp="OnListPreviewMouseLeftButtonUp"
+                                     PreviewMouseMove="OnListPreviewMouseMove"
+                                     LostMouseCapture="OnListLostMouseCapture"
+                                     MouseDoubleClick="OnListMouseDoubleClick"
+                                     PreviewTextInput="OnListTextInput"
+                                     SelectionChanged="OnListSelectionChanged"
+                                     PreviewKeyDown="OnListPreviewKeyDown"
+                                     KeyDown="OnListKeyDown" />
+                            <!-- ドラッグ中の範囲選択枠 -->
+                            <Canvas x:Name="MarqueeLayer" IsHitTestVisible="False" ClipToBounds="True">
+                                <Rectangle x:Name="MarqueeRect" Visibility="Collapsed"
+                                           Fill="#249CC8FF" Stroke="#CC9CC8FF" StrokeThickness="1"
+                                           StrokeDashArray="3 2" />
+                            </Canvas>
+                        </Grid>
                     </DockPanel>
                     <TextBlock x:Name="EmptyHint" IsHitTestVisible="False" Margin="16"
                                HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"

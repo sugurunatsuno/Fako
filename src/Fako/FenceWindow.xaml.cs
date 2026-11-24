@@ -107,6 +107,14 @@ public partial class FenceWindow : Window
     private Point _dragStart;
     private FenceItem? _dragItem;
 
+    // ドラッグによる範囲選択（マーキー）
+    private Point _marqueeStart;
+    private bool _marqueeActive;
+    private bool _marqueeVisible;
+    private bool _marqueeAdditive;
+    private readonly HashSet<FenceItem> _marqueeBaseSelection = new();
+    private const double MarqueeThreshold = 4;
+
     /// <summary>タイプアヘッド: 直近に入力した文字列と、その最後の入力時刻。</summary>
     private string _typeBuffer = "";
     private DateTime _typeBufferAt;
@@ -1024,16 +1032,44 @@ public partial class FenceWindow : Window
         _typeBuffer = "";
         _dragStart = e.GetPosition(this);
         _dragItem = ItemFromSource(e.OriginalSource);
-        if (_dragItem == null && e.OriginalSource is not System.Windows.Controls.Primitives.Thumb)
-            ItemsList.UnselectAll();
+
+        // 項目の上ではない所を押したら、範囲選択を開始する（スクロールバーは除く）
+        if (_dragItem == null && !IsScrollBarPart(e.OriginalSource))
+        {
+            BeginMarquee(e.GetPosition(ItemsList),
+                (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != 0);
+            e.Handled = true;
+        }
     }
 
     private void OnListPreviewMouseMove(object sender, MouseEventArgs e)
     {
+        if (_marqueeActive)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                EndMarquee();
+                return;
+            }
+
+            var pos = e.GetPosition(ItemsList);
+            if (!_marqueeVisible
+                && Math.Abs(pos.X - _marqueeStart.X) < MarqueeThreshold
+                && Math.Abs(pos.Y - _marqueeStart.Y) < MarqueeThreshold)
+                return;
+
+            _marqueeVisible = true;
+            var rect = ClampToItemsList(new Rect(_marqueeStart, pos));
+            ShowMarqueeRect(rect);
+            UpdateMarqueeSelection(rect);
+            e.Handled = true;
+            return;
+        }
+
         if (_dragItem == null || e.LeftButton != MouseButtonState.Pressed) return;
-        var pos = e.GetPosition(this);
-        if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        var dragPos = e.GetPosition(this);
+        if (Math.Abs(dragPos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(dragPos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
             return;
 
         var items = ItemsList.SelectedItems.Cast<FenceItem>().ToList();
@@ -1058,6 +1094,104 @@ public partial class FenceWindow : Window
         DragDrop.DoDragDrop(ItemsList, data, DragDropEffects.Copy | DragDropEffects.Link);
     }
 
+    private static bool IsScrollBarPart(object? source)
+    {
+        var d = source as DependencyObject;
+        while (d != null && d is not ListBox)
+        {
+            if (d is System.Windows.Controls.Primitives.ScrollBar
+                or System.Windows.Controls.Primitives.Thumb
+                or System.Windows.Controls.Primitives.RepeatButton)
+                return true;
+            d = d is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(d)
+                : LogicalTreeHelper.GetParent(d);
+        }
+        return false;
+    }
+
+    private void BeginMarquee(Point start, bool additive)
+    {
+        _marqueeStart = start;
+        _marqueeActive = true;
+        _marqueeVisible = false;
+        _marqueeAdditive = additive;
+
+        _marqueeBaseSelection.Clear();
+        if (additive)
+        {
+            foreach (var item in ItemsList.SelectedItems.Cast<FenceItem>())
+                _marqueeBaseSelection.Add(item);
+        }
+        else
+        {
+            ItemsList.UnselectAll();
+        }
+
+        MarqueeRect.Visibility = Visibility.Collapsed;
+        ItemsList.CaptureMouse();
+        ItemsList.Focus();
+    }
+
+    private void EndMarquee()
+    {
+        if (!_marqueeActive) return;
+        _marqueeActive = false;
+        _marqueeVisible = false;
+        _marqueeBaseSelection.Clear();
+        MarqueeRect.Visibility = Visibility.Collapsed;
+        if (ItemsList.IsMouseCaptured) ItemsList.ReleaseMouseCapture();
+    }
+
+    private void OnListLostMouseCapture(object sender, MouseEventArgs e) => EndMarquee();
+
+    private Rect ClampToItemsList(Rect rect)
+    {
+        double maxX = Math.Max(0, ItemsList.ActualWidth);
+        double maxY = Math.Max(0, ItemsList.ActualHeight);
+        double left = Math.Clamp(Math.Min(rect.Left, rect.Right), 0, maxX);
+        double top = Math.Clamp(Math.Min(rect.Top, rect.Bottom), 0, maxY);
+        double right = Math.Clamp(Math.Max(rect.Left, rect.Right), 0, maxX);
+        double bottom = Math.Clamp(Math.Max(rect.Top, rect.Bottom), 0, maxY);
+        return new Rect(new Point(left, top), new Point(right, bottom));
+    }
+
+    private void ShowMarqueeRect(Rect rect)
+    {
+        Canvas.SetLeft(MarqueeRect, rect.Left);
+        Canvas.SetTop(MarqueeRect, rect.Top);
+        MarqueeRect.Width = rect.Width;
+        MarqueeRect.Height = rect.Height;
+        MarqueeRect.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateMarqueeSelection(Rect rect)
+    {
+        var desired = new HashSet<FenceItem>();
+        for (int i = 0; i < ItemsList.Items.Count; i++)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem container
+                || !container.IsVisible
+                || container.DataContext is not FenceItem item)
+                continue;
+
+            var bounds = container.TransformToAncestor(ItemsList)
+                .TransformBounds(new Rect(container.RenderSize));
+            if (rect.IntersectsWith(bounds)) desired.Add(item);
+        }
+        if (_marqueeAdditive) desired.UnionWith(_marqueeBaseSelection);
+
+        // 差分だけ反映する（毎回すべて外して入れ直すとちらつくため）
+        foreach (var item in ItemsList.SelectedItems.Cast<FenceItem>().ToList())
+        {
+            if (!desired.Contains(item)) ItemsList.SelectedItems.Remove(item);
+        }
+        foreach (var item in desired)
+        {
+            if (!ItemsList.SelectedItems.Contains(item)) ItemsList.SelectedItems.Add(item);
+        }
+    }
+
     private void OnListMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (ItemFromSource(e.OriginalSource) is not { } item) return;
@@ -1067,6 +1201,13 @@ public partial class FenceWindow : Window
     /// <summary>シングルクリックで開く設定のとき、ドラッグにならなかったクリックで開く。</summary>
     private void OnListPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_marqueeActive)
+        {
+            EndMarquee();
+            e.Handled = true;
+            return;
+        }
+
         var item = _dragItem;
         _dragItem = null;
         if (!App.Current.Config.SingleClickOpen || item is null) return;
