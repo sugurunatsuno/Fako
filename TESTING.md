@@ -35,6 +35,23 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | 最近のファイル仮想フェンス | OK（検索パレットに最近の項目が表示） |
 | アップデート適用モード | OK（`--apply-update` で自己置換 → 1.0.0 として再起動、ハッシュ一致） |
 | ビルド（アプリ／SSH テスト／単体テスト） | OK（0 warning / 0 error） |
+| 1.0.0 のインストール（Release 資産） | OK（SHA256 一致、1.0.0 で起動） |
+| 設定画面（1.0.0、アップデート項目を含む） | OK |
+
+### CI/CD
+
+- main への push で `Build and test` が成功（ビルド＋101 テスト）。
+- 続く `Publish release` が `v1.0.0` を作成し、`Fako.exe` / `Fako.exe.sha256` / `Fako-1.0.0-win-x64.zip` をアップロード。
+- 同じバージョンで再 push した場合は、既存 Release を検出して公開処理をスキップ。
+- リポジトリは public。`https://api.github.com/repos/sugurunatsuno/Fako/releases/latest` が `v1.0.0` を返すことを確認。
+
+### アップデートの実通信
+
+- 一時的な `v1.0.1` リリースを作り、`UpdateService.CheckAsync` が 1.0.1 を検出すること、
+  `Fako.exe` と `Fako.exe.sha256` をダウンロードして SHA256 検証が通ることを確認。
+- 検証後に一時リリースは削除し、`latest` が `v1.0.0` に戻ることを確認。
+- ダウンロードした exe を `--apply-update` で起動し、自己置換・再起動することを別途確認済み。
+- 通知ダイアログと進捗ウィンドウの目視確認は未実施（手動確認項目）。
 
 ## 機能チェックリスト
 
@@ -66,7 +83,8 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | 設定 | 全般／スナップ／自動振り分け／外観／情報 | 手動 |
 | 入出力 | 設定の書き出し／読み込み、バックアップ | 自動（ロジック）／手動（UI） |
 | 常駐 | トレイメニュー、自動起動、設定フォルダーを開く | 自動（登録）／手動（メニュー） |
-| アップデート | 起動時確認、手動確認、ダウンロード、SHA256、再起動 | 自動（解析・適用）／手動（実通信） |
+| アップデート | 起動時確認、手動確認、ダウンロード、SHA256、再起動 | 自動（解析・通信・適用）／手動（通知 UI） |
+| CI/CD | main push でビルド・テスト・Release 自動作成 | 自動（GitHub Actions）／手動（資産の実行確認） |
 
 ## リリース前に手動で見る優先順位
 
