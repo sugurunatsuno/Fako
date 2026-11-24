@@ -46,6 +46,7 @@ public partial class SettingsWindow : Window
         DoubleClickBox.IsChecked = cfg.DoubleClickToHide;
         SingleClickBox.IsChecked = cfg.SingleClickOpen;
         PrivacyBox.IsChecked = cfg.PrivacyMode;
+        UpdateCheckBox.IsChecked = cfg.CheckForUpdates;
         ManagedRadio.IsChecked = App.Current.IsFenceManaged;
         NotManagedRadio.IsChecked = !App.Current.IsFenceManaged;
 
@@ -103,6 +104,7 @@ public partial class SettingsWindow : Window
         cfg.DoubleClickToHide = DoubleClickBox.IsChecked == true;
         cfg.SingleClickOpen = SingleClickBox.IsChecked == true;
         cfg.PrivacyMode = PrivacyBox.IsChecked == true;
+        cfg.CheckForUpdates = UpdateCheckBox.IsChecked == true;
         cfg.IconMode = ManagedRadio.IsChecked == true ? DesktopIconMode.FenceManaged : DesktopIconMode.NotManaged;
 
         cfg.SnapEnabled = SnapBox.IsChecked == true;
@@ -354,6 +356,8 @@ public partial class SettingsWindow : Window
         Directory.CreateDirectory(ConfigStore.Directory);
         Process.Start("explorer.exe", $"\"{ConfigStore.Directory}\"");
     }
+
+    private void OnCheckUpdates(object sender, RoutedEventArgs e) => App.Current.CheckForUpdatesNow();
 
     private void OnOpenLog(object sender, RoutedEventArgs e)
     {

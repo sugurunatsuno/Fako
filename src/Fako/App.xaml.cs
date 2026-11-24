@@ -32,6 +32,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // アップデート適用モード（--apply-update <target> <pid>）なら、通常起動はしない
+        if (UpdateService.TryApplyUpdate(e.Args))
+        {
+            Shutdown();
+            return;
+        }
+
         DispatcherUnhandledException += OnUnhandledException;
 
         // 設定フォルダーごとに 1 つ（FAKO_HOME でテスト用の別インスタンスを並べて動かせる）
@@ -143,6 +151,67 @@ public partial class App : Application
         _foreground = new ForegroundWatcher();
         _foreground.DesktopForegroundChanged += SetFencesRaised;
         SetFencesRaised(ForegroundWatcher.IsDesktopForeground());
+
+        if (Config.CheckForUpdates)
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            timer.Tick += (_, _) => { timer.Stop(); CheckForUpdates(manual: false); };
+            timer.Start();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // アップデート
+    // ------------------------------------------------------------------
+
+    private bool _checkingUpdates;
+
+    public void CheckForUpdatesNow() => CheckForUpdates(manual: true);
+
+    private async void CheckForUpdates(bool manual)
+    {
+        if (_checkingUpdates) return;
+        _checkingUpdates = true;
+        try
+        {
+            var info = await UpdateService.CheckAsync();
+            if (info is null)
+            {
+                if (manual)
+                    MessageBox.Show($"最新版です（{UpdateService.CurrentVersion}）。", "Fako のアップデート",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!manual && string.Equals(Config.SkippedVersion, info.Version.ToString(), StringComparison.Ordinal))
+                return;
+
+            var result = MessageBox.Show(
+                $"Fako {info.Version} が公開されています。\n現在のバージョン: {UpdateService.CurrentVersion}\n\n" +
+                "ダウンロードして更新しますか？\n（更新後に Fako を再起動します）",
+                "Fako のアップデート", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (result != MessageBoxResult.Yes)
+            {
+                if (!manual)
+                {
+                    Config.SkippedVersion = info.Version.ToString();
+                    SaveSoon();
+                }
+                return;
+            }
+
+            new UpdateWindow(info).ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("アップデートの確認に失敗", ex);
+            if (manual)
+                MessageBox.Show($"アップデートを確認できませんでした。\n{ex.Message}", "Fako のアップデート",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _checkingUpdates = false;
+        }
     }
 
     private ForegroundWatcher? _foreground;

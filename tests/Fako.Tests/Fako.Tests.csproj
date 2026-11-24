@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Fako 本体と同じ警告（WPF0001: Window.ThemeMode は .NET 10 の試験的 API、WFO0003: DPI は manifest 側）を抑止 -->
+    <NoWarn>$(NoWarn);WPF0001;WFO0003</NoWarn>
+    <!--
+      TestHost 18.x は既定で親プロセスのハンドルを開いて終了を監視する。
+      権限の制限された環境（サンドボックス等）では OpenProcess がアクセス拒否になり
+      testhost ごと落ちるため、親プロセス監視を切る（テストの実行結果には影響しない）。
+    -->
+    <_MSTestEnableParentProcessQuery>false</_MSTestEnableParentProcessQuery>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fako\Fako.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

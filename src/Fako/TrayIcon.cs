@@ -157,6 +157,7 @@ internal sealed class TrayIcon : IDisposable
         var settings = new WinForms.ToolStripMenuItem("設定…", null, (_, _) => app.OpenSettings());
         settings.Font = new System.Drawing.Font(settings.Font, System.Drawing.FontStyle.Bold);
         menu.Items.Add(settings);
+        menu.Items.Add("アップデートを確認…", null, (_, _) => app.CheckForUpdatesNow());
         menu.Items.Add("自動振り分けのルール…", null, (_, _) => app.OpenSettings(2));
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("新しいフェンス", null, (_, _) => app.NewFence());

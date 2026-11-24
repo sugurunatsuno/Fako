@@ -1,0 +1,174 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore app
+        run: dotnet restore src/Fako/Fako.csproj
+
+      - name: Restore remote tests
+        run: dotnet restore tests/Fako.RemoteTests/Fako.RemoteTests.csproj
+
+      - name: Build app (Release)
+        run: dotnet build src/Fako/Fako.csproj -c Release --no-restore
+
+      - name: Build remote tests (Release)
+        run: dotnet build tests/Fako.RemoteTests/Fako.RemoteTests.csproj -c Release --no-restore
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $testProject = 'tests/Fako.Tests/Fako.Tests.csproj'
+          if (-not (Test-Path $testProject)) {
+            Write-Host "$testProject not found; skipping dotnet test."
+            exit 0
+          }
+          dotnet test $testProject -c Release
+          exit $LASTEXITCODE
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: release-main
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version from Fako.csproj
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (dotnet msbuild src/Fako/Fako.csproj -nologo -getProperty:Version).Trim()
+          if (-not $version) { throw 'Could not read <Version> from src/Fako/Fako.csproj' }
+          Write-Host "Version: $version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Check for an existing release
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh release view $env:TAG --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:TAG already exists; skipping publish."
+            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          else {
+            Write-Host "Release $env:TAG does not exist; it will be created."
+            "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Publish single-file executable
+        if: steps.check.outputs.exists == 'false'
+        run: >
+          dotnet publish src/Fako/Fako.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o out
+
+      - name: Create release assets
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (-not (Test-Path 'out/Fako.exe')) { throw 'out/Fako.exe was not produced by dotnet publish.' }
+
+          $hash = (Get-FileHash -Path 'out/Fako.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText(
+            (Join-Path $PWD 'out/Fako.exe.sha256'),
+            "$hash  Fako.exe`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+          Write-Host "SHA256: $hash"
+
+          $stage = Join-Path $env:RUNNER_TEMP 'Fako-package'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item 'out/Fako.exe' -Destination $stage -Force
+          Copy-Item 'README.md' -Destination $stage -Force
+          Copy-Item 'はじめにお読みください.md' -Destination $stage -Force
+
+          $zip = "Fako-$env:VERSION-win-x64.zip"
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          Write-Host "Created $zip"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          $notes = @(
+            'Windows 10/11 向けの Fako です。.NET ランタイムのインストールは不要です。'
+            ''
+            '### ダウンロード'
+            ''
+            "- **Fako-$env:VERSION-win-x64.zip** — 展開して Fako.exe を実行（README 同梱）"
+            '- **Fako.exe** — 実行ファイルのみ'
+            '- **Fako.exe.sha256** — Fako.exe の SHA256 チェックサム'
+            ''
+            '### インストール'
+            ''
+            '1. zip を展開する'
+            '2. Fako.exe を任意のフォルダーに置いて起動する'
+          ) -join "`n"
+
+          $assets = @(
+            'out/Fako.exe'
+            'out/Fako.exe.sha256'
+            "Fako-$env:VERSION-win-x64.zip"
+          )
+
+          gh release create "v$env:VERSION" @assets --title "Fako $env:VERSION" --notes $notes --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }

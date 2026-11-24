@@ -1,0 +1,26 @@
+<Window x:Class="Fako.UpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Fako のアップデート" Width="480" Height="220"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False" Topmost="True" ThemeMode="System"
+        FontFamily="Yu Gothic UI" FontSize="13"
+        Icon="Assets/fako.ico">
+    <Grid Margin="20,18,20,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="VersionText" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,8,0,0" Opacity="0.8" TextWrapping="Wrap" />
+        <ProgressBar x:Name="Bar" Grid.Row="2" Height="8" Margin="0,14,0,0" Minimum="0" Maximum="100" />
+
+        <DockPanel Grid.Row="3" Margin="0,16,0,0" LastChildFill="True">
+            <Button DockPanel.Dock="Right" Content="キャンセル" MinWidth="96" Click="OnCancel" />
+            <TextBlock x:Name="PercentText" VerticalAlignment="Center" Opacity="0.7" />
+        </DockPanel>
+    </Grid>
+</Window>

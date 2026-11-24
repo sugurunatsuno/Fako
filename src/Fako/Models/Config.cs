@@ -193,6 +193,10 @@ public sealed class AppConfig
     public bool SingleClickOpen { get; set; }
     /// <summary>画面共有向け。マウスを乗せるまで中身と名前を隠す。</summary>
     public bool PrivacyMode { get; set; }
+    /// <summary>起動時に新しいバージョンを確認する。</summary>
+    public bool CheckForUpdates { get; set; } = true;
+    /// <summary>「後で」を選んだバージョン（そのバージョンの自動通知を抑止）。</summary>
+    public string? SkippedVersion { get; set; }
     /// <summary>デスクトップのアイコンをフェンスで管理するか。null = 旧設定から移行する。</summary>
     public DesktopIconMode? IconMode { get; set; }
 
