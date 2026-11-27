@@ -2,7 +2,7 @@
 
 デスクトップのアイコンを「フェンス」でまとめる、Windows 用の常駐ツール。
 
-- 版: **1.0.4**
+- 版: **1.1.0**
 - 実装: C# / WPF / .NET 10（`net10.0-windows`）
 - リポジトリ: `fako\`（`src\Fako`, `tests\Fako.RemoteTests`, `install.ps1`）
 

@@ -1,6 +1,6 @@
 # テストと動作確認
 
-対象バージョン: **1.0.4**
+対象バージョン: **1.1.0**
 
 このドキュメントは、リリース前に行った自動テスト・スモークテストと、
 実機でしか確認できない項目のチェックリストです。
@@ -11,12 +11,13 @@
 dotnet test tests/Fako.Tests/Fako.Tests.csproj -c Release
 ```
 
-- **175 件 / 失敗 0 / スキップ 0**（約 1 秒、WPF オフスクリーン描画検証・SSH エージェント通信検証を含む）
+- **195 件 / 失敗 0 / スキップ 0**（約 1 秒、WPF オフスクリーン描画検証・SSH エージェント通信検証を含む）
 - 内訳:
   - `DesktopBackgroundTests` — 画面基準の画像配置・座標変換・枠の太さ補正・WPF `RenderTargetBitmap` ピクセル描画検証（移動固定・角丸クリップ・透過率・欠損フォールバック・再デコードなし）
   - `SshAgentClientTests` — OpenSSH Agent プロトコル（RFC 9987）の名前付きパイプ通信、鍵一覧取得・署名要求・拒否／異常長／途中切断／タイムアウト、パイプ名解決・正規化、`.pub` 公開鍵の指紋計算、エラー文言
   - `SshAgentKeySourceTests` — `SshAgentPrivateKeySource` / `SshAgentHostAlgorithm` のアルゴリズム展開（RSA SHA-2 優先）と署名委譲、`RemoteSession` の事前検証
   - `SshConfigReaderTests` — `~/.ssh/config` の `IdentityAgent` / `IdentitiesOnly`、`Host *` 既定値継承、優先順位
+  - `FenceZOrderAndFadeTests` — デスクトップ直上の Z オーダー決定（自プロセスのフェンス除外・循環停止・トップモスト時のフォールバック）、`WM_WINDOWPOSCHANGING` の補正条件、フェードアウト完了後の世代付き `Hide()` 予約とキャンセル
   - `UpdateServiceTests` — リリースタグのバージョン解析（v 付き、pre-release、build メタデータ、不正値）
   - `ConfigStoreLayoutTests` — 設定の書き出し／読み込み、タブ、背景画像スタイル往復、SSH エージェント設定往復・旧 JSON 後方互換、シークレット除去、形式・バージョン拒否、旧形式移行
   - `ConfigMigrationTests` — `Items` / `Tabs` / `Fences` の null および背景画像設定の不正値を正規化する
@@ -95,6 +96,12 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | 常駐 | トレイメニュー、自動起動、設定フォルダーを開く | 自動（登録）／手動（メニュー） |
 | アップデート | 起動時確認、手動確認、ダウンロード、SHA256、再起動 | 自動（解析・通信・適用）／手動（通知 UI） |
 | CI/CD | main push でビルド・テスト・Release 自動作成 | 自動（GitHub Actions）／手動（資産の実行確認） |
+
+## 1.1.0 の変更
+
+- SSH フェンスで **SSH エージェント認証**に対応（#2）。Bitwarden・1Password・KeePassXC・Windows 標準の `ssh-agent` の鍵を使い、`~/.ssh/config` の `IdentityAgent` / `IdentitiesOnly` も反映する。使用する鍵は一覧から選べる。
+- デスクトップのダブルクリックで表示／非表示を切り替えたときの**ちらつきを修正**（#3）。あわせてトレイからの再表示でフェンスが見えない問題と、複数フェンスの Z オーダーが入れ替わる問題も解消。
+- README に**アプリのスクリーンショット**を追加（#4）。
 
 ## 1.0.4 の修正
 
