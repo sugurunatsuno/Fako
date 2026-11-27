@@ -8,6 +8,9 @@ internal static class Desktop
     /// <summary>エクスプローラーの「デスクトップ アイコンの表示」切り替えコマンド。</summary>
     private const int CmdToggleDesktopIcons = 0x7402;
 
+    /// <summary>直近に見つけたデスクトップ土台ウィンドウ（SHELLDLL_DefView の存在で有効性を検証する）。</summary>
+    private static IntPtr _cachedDesktopRoot;
+
     public static IntPtr GetProgman() => FindWindow("Progman", null);
 
     /// <summary>
@@ -17,13 +20,21 @@ internal static class Desktop
     public static IntPtr GetDesktopRoot()
     {
         var foreground = GetForegroundWindow();
-        if (GetClassName(foreground) is "Progman" or "WorkerW") return foreground;
+        if (IsDesktopRootClass(foreground)) return foreground;
+
+        var cached = _cachedDesktopRoot;
+        if (cached != IntPtr.Zero && FindWindowEx(cached, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero)
+            return cached;
 
         var defView = FindDefView();
         if (defView != IntPtr.Zero)
         {
             var root = GetParent(defView);
-            if (GetClassName(root) is "Progman" or "WorkerW") return root;
+            if (IsDesktopRootClass(root))
+            {
+                _cachedDesktopRoot = root;
+                return root;
+            }
         }
         return GetProgman();
     }
@@ -37,7 +48,7 @@ internal static class Desktop
         // 壁紙のスライドショー等で WorkerW の下に移っていることがある
         EnumWindows((hwnd, _) =>
         {
-            if (GetClassName(hwnd) != "WorkerW") return true;
+            if (!IsWindowClass(hwnd, "WorkerW")) return true;
             var dv = FindWindowEx(hwnd, IntPtr.Zero, "SHELLDLL_DefView", null);
             if (dv == IntPtr.Zero) return true;
             defView = dv;

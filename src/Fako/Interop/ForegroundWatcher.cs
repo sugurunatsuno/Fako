@@ -24,7 +24,7 @@ internal sealed class ForegroundWatcher : IDisposable
 
     public static bool IsDesktopForeground() => IsDesktopWindow(GetForegroundWindow());
 
-    private static bool IsDesktopWindow(IntPtr hwnd) => GetClassName(hwnd) is "Progman" or "WorkerW";
+    private static bool IsDesktopWindow(IntPtr hwnd) => IsDesktopRootClass(hwnd);
 
     private void OnEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
