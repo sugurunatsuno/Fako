@@ -192,6 +192,7 @@ public partial class FenceWindow : Window
             DisposeRemote();
         };
 
+        InitializeDesktopBackground();
         ApplyAppearance();
         ApplyView();
         SetupWatchers();
@@ -555,11 +556,10 @@ public partial class FenceWindow : Window
     public void ApplyAppearance()
     {
         var s = Host.Style;
-        var bg = ColorUtil.Parse(s.Background, ColorUtil.DefaultBackground, minAlpha: 0x10); // 完全透明だとクリックが素通りする
-        Root.Background = new SolidColorBrush(bg);
         Root.BorderBrush = new SolidColorBrush(ColorUtil.Parse(s.BorderColor, Colors.Transparent));
         Root.BorderThickness = new Thickness(s.BorderThickness);
         Root.CornerRadius = new CornerRadius(s.CornerRadius);
+        UpdateDesktopBackground();
 
         TitleBar.Height = Math.Round(Math.Max(20, s.TitleFontSize * 2));
         TitleBar.Background = s.TitleBackground is { Length: > 0 } tb

@@ -121,6 +121,9 @@ public sealed class FenceConfig
 public sealed class FenceStyle
 {
     public string Background { get; set; } = "#A0202428";
+    public string? BackgroundImagePath { get; set; }
+    public double BackgroundImageOpacity { get; set; } = 1.0;
+    public string BackgroundImageStretch { get; set; } = "UniformToFill";
     /// <summary>null = 自動（背景に白を薄く重ねる）。</summary>
     public string? TitleBackground { get; set; }
     public string TitleForeground { get; set; } = "#FFFFFFFF";
@@ -135,6 +138,18 @@ public sealed class FenceStyle
     public bool TextShadow { get; set; } = true;
 
     public FenceStyle Clone() => (FenceStyle)MemberwiseClone();
+
+    /// <summary>読み込み時に背景画像の不正な値を安全な既定値へ正規化する。</summary>
+    public void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(BackgroundImagePath))
+            BackgroundImagePath = null;
+        BackgroundImageOpacity = double.IsFinite(BackgroundImageOpacity)
+            ? Math.Clamp(BackgroundImageOpacity, 0, 1)
+            : 1.0;
+        if (BackgroundImageStretch is not ("UniformToFill" or "Uniform" or "Fill"))
+            BackgroundImageStretch = "UniformToFill";
+    }
 }
 
 public enum TitleAlign
@@ -253,6 +268,7 @@ public sealed class AppConfig
         foreach (var f in AllPages())
         {
             f.Style ??= new FenceStyle();
+            f.Style.Normalize();
             f.Items ??= new();
             if (!string.IsNullOrEmpty(f.Color))
             {
@@ -261,6 +277,7 @@ public sealed class AppConfig
             }
         }
         DefaultStyle ??= new FenceStyle();
+        DefaultStyle.Normalize();
         Rules ??= new();
         RuleExclusions ??= new();
         HiddenByFako ??= new();

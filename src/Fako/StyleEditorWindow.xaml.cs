@@ -79,6 +79,8 @@ public partial class StyleEditorWindow : Window
         LoadControls();
         UpdatePreview();
         Closed += OnClosedWindow;
+        PreviewRoot.SizeChanged += (_, _) => UpdateBackgroundPreview();
+        Loaded += (_, _) => UpdateBackgroundPreview();
     }
 
     // ------------------------------------------------------------------
@@ -97,6 +99,9 @@ public partial class StyleEditorWindow : Window
         var bg = ColorUtil.Parse(s.Background, ColorUtil.DefaultBackground);
         _backgroundRgb = Rgb(bg);
         BackgroundAlpha.Value = Math.Max(5, Pct(bg.A));
+        BackgroundImageAlpha.Value = DesktopBackground.NormalizeOpacity(s.BackgroundImageOpacity) * 100;
+        BackgroundImageMode.SelectedIndex = s.BackgroundImageStretch switch { "Uniform" => 1, "Fill" => 2, _ => 0 };
+        RefreshBackgroundImageName();
 
         var title = ColorUtil.Parse(s.TitleBackground, Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF));
         _titleRgb = Rgb(title);
@@ -127,6 +132,8 @@ public partial class StyleEditorWindow : Window
     {
         var s = _style;
         s.Background = ColorUtil.ToHex(ColorUtil.WithAlpha(_backgroundRgb, Alpha(BackgroundAlpha)));
+        s.BackgroundImageOpacity = BackgroundImageAlpha.Value / 100;
+        s.BackgroundImageStretch = (BackgroundImageMode.SelectedItem as ComboBoxItem)?.Tag as string ?? "UniformToFill";
         bool auto = TitleAuto.IsChecked == true;
         s.TitleBackground = auto ? null : ColorUtil.ToHex(ColorUtil.WithAlpha(_titleRgb, Alpha(TitleAlpha)));
         s.TitleForeground = ColorUtil.ToHex(_titleTextRgb);
@@ -219,6 +226,49 @@ public partial class StyleEditorWindow : Window
         OnChanged(this, new RoutedEventArgs());
     }
 
+    private readonly DesktopBackground _previewBackground = new();
+
+    private void RefreshBackgroundImageName()
+    {
+        bool hasImage = !string.IsNullOrWhiteSpace(_style.BackgroundImagePath);
+        BackgroundImageName.Text = hasImage ? System.IO.Path.GetFileName(_style.BackgroundImagePath) : "未設定";
+        BackgroundImageName.ToolTip = hasImage ? _style.BackgroundImagePath : null;
+        ClearBackgroundImageButton.IsEnabled = hasImage;
+        BackgroundImageAlpha.IsEnabled = hasImage;
+        BackgroundImageMode.IsEnabled = hasImage;
+        double opacity = hasImage ? 1 : 0.4;
+        BackgroundImageAlpha.Opacity = opacity;
+        BackgroundImageMode.Opacity = opacity;
+    }
+
+    private void OnPickBackgroundImage(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "画像|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|すべてのファイル|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            _style.BackgroundImagePath = DesktopBackground.Import(dialog.FileName);
+            RefreshBackgroundImageName();
+            UpdatePreview();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "画像を読み込めませんでした。\n" + ex.Message, "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnClearBackgroundImage(object sender, RoutedEventArgs e)
+    {
+        _style.BackgroundImagePath = null;
+        RefreshBackgroundImageName();
+        UpdatePreview();
+    }
+
     private void OnPickBackground(object sender, RoutedEventArgs e) => Pick(ref _backgroundRgb);
     private void OnPickTitleBackground(object sender, RoutedEventArgs e) => Pick(ref _titleRgb);
     private void OnPickTitleColor(object sender, RoutedEventArgs e) => Pick(ref _titleTextRgb);
@@ -260,13 +310,26 @@ public partial class StyleEditorWindow : Window
         }
     }
 
+    private void UpdateBackgroundPreview()
+    {
+        var region = _fence?.DesktopBackgroundRegion();
+        var desktop = DesktopBackground.DesktopBounds();
+        if (region is null || region.Value.IsEmpty)
+            region = new Rect(desktop.X + desktop.Width * 0.15, desktop.Y + desktop.Height * 0.15,
+                desktop.Width * 0.35, desktop.Height * 0.25);
+        var inner = DesktopBackground.InnerLocalBounds(
+            PreviewRoot.ActualWidth, PreviewRoot.ActualHeight, PreviewRoot.BorderThickness);
+        PreviewRoot.Background = _previewBackground.CreateBrush(_style, region.Value,
+            inner.IsEmpty ? 0 : inner.Width, inner.IsEmpty ? 0 : inner.Height);
+    }
+
     private void UpdatePreview()
     {
         var s = _style;
-        PreviewRoot.Background = new SolidColorBrush(ColorUtil.Parse(s.Background, ColorUtil.DefaultBackground, 0x10));
         PreviewRoot.BorderBrush = new SolidColorBrush(ColorUtil.Parse(s.BorderColor, Colors.Transparent));
         PreviewRoot.BorderThickness = new Thickness(s.BorderThickness);
         PreviewRoot.CornerRadius = new CornerRadius(s.CornerRadius);
+        UpdateBackgroundPreview();
         double inner = Math.Max(0, s.CornerRadius - s.BorderThickness);
         PreviewTitleBar.CornerRadius = new CornerRadius(inner, inner, 0, 0);
         PreviewTitleBar.Height = Math.Round(Math.Max(20, s.TitleFontSize * 2));
