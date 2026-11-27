@@ -188,6 +188,7 @@ public partial class FenceWindow : Window
         };
         Closed += (_, _) =>
         {
+            CancelPendingHide();
             DisposeWatchers();
             DisposeRemote();
         };
@@ -357,12 +358,12 @@ public partial class FenceWindow : Window
     // ------------------------------------------------------------------
 
     // 張り付きの方針:
-    //   通常は Z オーダー最背面（デスクトップ Progman の直上）に固定する。
-    //   ただし Windows 11 の「デスクトップの表示」(Win+D) やデスクトップのクリックでは
-    //   デスクトップ自体が前面に来てフェンスが隠れるので、そのときだけデスクトップの直上へ
-    //   持ち上げる（App の ForegroundWatcher が SetRaised を呼ぶ）。
-    //   このとき HWND_TOP にすると他のアプリの上に出てしまうため、必ずデスクトップの
-    //   1 つ上にあるウィンドウを基準にする。
+    //   常にデスクトップ（Progman / WorkerW）の直上、かつ他の通常アプリより背面に固定する。
+    //   HWND_BOTTOM を使うとデスクトップ（Progman）の背後に回って見えなくなるため使わない。
+    //   また HWND_TOP を使うと他のアプリより前面に出てしまうため、デスクトップから上方向へ辿り
+    //   自プロセスのフェンスを除いた最初のウィンドウを基準にする（無ければ HWND_TOP）。
+    //   Show() 前および WM_WINDOWPOSCHANGING でこの Z オーダーを強制することで、
+    //   表示の瞬間に他のウィンドウの前面へ 1 フレーム出るちらつきを防ぐ。
     //
     // ※ Progman を所有者にする定番の手は、Windows 10/11 対応を manifest で宣言した
     //   プロセスでは SetWindowLongPtr(GWLP_HWNDPARENT) が ERROR_INVALID_PARAMETER で拒否されるため使わない。
@@ -376,44 +377,36 @@ public partial class FenceWindow : Window
         SetWindowLongPtr(_hwnd, GWL_EXSTYLE, new IntPtr(ex));
 
         HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
+
+        // 初回 Show() で可視化される前にデスクトップ直上へ配置しておく
+        if (!_peek)
+            ApplyDesktopZOrder(requireVisible: false);
     }
 
     private IntPtr _hwnd;
-    private bool _raised;
     private bool _peek;
     private bool _peekExpanded;
+    private readonly FadeHideCoordinator _fadeHide = new();
+    private bool _hideRenderHooked;
 
     public IntPtr Handle => _hwnd;
 
-    /// <summary>true: デスクトップが前面にある間、その上に出す。false: 最背面へ戻す。</summary>
-    public void SetRaised(bool raised)
+    /// <summary>デスクトップの直上（他アプリより背面）に配置する。</summary>
+    public void SetRaised(bool raised) => ApplyDesktopZOrder(requireVisible: true);
+
+    private void ApplyDesktopZOrder(bool requireVisible)
     {
-        _raised = raised;
-        if (_hwnd == IntPtr.Zero || !IsVisible || _peek) return;
-        var insertAfter = raised ? DesktopInsertAfter() : HWND_BOTTOM;
-        if (insertAfter == _hwnd) return; // 既にデスクトップの直上にある
-        SetWindowPos(_hwnd, insertAfter, 0, 0, 0, 0,
+        if (_hwnd == IntPtr.Zero || _peek) return;
+        if (requireVisible && !IsVisible) return;
+
+        var target = ResolveDesktopTarget();
+        if (target.AlreadyInPlace || target.InsertAfter == _hwnd) return;
+        SetWindowPos(_hwnd, target.InsertAfter, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
 
-    /// <summary>
-    /// デスクトップのすぐ上に挿入するための hWndInsertAfter。
-    /// HWND_TOP だと、デスクトップをクリックしただけで他のアプリより前面に出てしまうため、
-    /// デスクトップの 1 つ上にあるウィンドウ（無ければ HWND_TOP）を基準にする。
-    /// </summary>
-    private static IntPtr DesktopInsertAfter()
-    {
-        var desktop = Desktop.GetDesktopRoot();
-        if (desktop == IntPtr.Zero) return HWND_TOP;
-
-        var above = NativeMethods.GetWindow(desktop, GW_HWNDPREV);
-        if (above == IntPtr.Zero) return HWND_TOP;
-
-        // トップモストのウィンドウを基準にすると、こちらもトップモスト扱いになることがある。
-        // その場合は通常ウィンドウ帯の先頭（HWND_TOP）に置く。
-        long ex = GetWindowLongPtr(above, GWL_EXSTYLE).ToInt64();
-        return (ex & WS_EX_TOPMOST) != 0 ? HWND_TOP : above;
-    }
+    private DesktopZTarget ResolveDesktopTarget() =>
+        FenceZOrder.ResolveDesktopTarget(_hwnd, Desktop.GetDesktopRoot(), App.Current.FenceWindows);
 
     /// <summary>Peek 中は全ウィンドウの上（最前面）に出し、終わったら通常の Z オーダーへ戻す。</summary>
     public void SetPeek(bool on)
@@ -448,8 +441,10 @@ public partial class FenceWindow : Window
         }
         else
         {
-            // 通常の Z オーダーへ戻す。_raised ならデスクトップの直上、そうでなければ最背面。
-            SetRaised(_raised);
+            // WS_EX_TOPMOST を確実に解除してから、通常のデスクトップ直上へ戻す
+            SetWindowPos(_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            ApplyDesktopZOrder(requireVisible: true);
         }
     }
 
@@ -462,14 +457,15 @@ public partial class FenceWindow : Window
             return menuResult;
         }
 
-        if (msg == WM_WINDOWPOSCHANGING && !_raised && !_peek)
+        if (msg == WM_WINDOWPOSCHANGING && !_peek)
         {
-            // Z オーダーが変わるときは常に最背面へ（他のウィンドウの上に出てこない）
+            // Z オーダーが変わるときは常にデスクトップ直上へ補正（Show() 直後やクリック時も他アプリの前に出さない）
             var pos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
-            if ((pos.flags & SWP_NOZORDER) == 0)
+            if ((pos.flags & (SWP_NOZORDER | SWP_HIDEWINDOW)) == 0)
             {
-                pos.hwndInsertAfter = HWND_BOTTOM;
-                Marshal.StructureToPtr(pos, lParam, false);
+                var target = ResolveDesktopTarget();
+                if (FenceZOrder.TryAdjustWindowPos(ref pos, isPeek: false, target))
+                    Marshal.StructureToPtr(pos, lParam, false);
             }
         }
         else if ((msg == Snapper.WM_MOVING || msg == Snapper.WM_SIZING) && App.Current.Config.SnapEnabled
@@ -668,18 +664,66 @@ public partial class FenceWindow : Window
 
     public void FadeTo(bool visible)
     {
+        int gen = _fadeHide.BeginFade();
+        UnhookPendingHideRender();
+
+        if (!visible && !IsVisible) return;
+
         var anim = new DoubleAnimation(visible ? 1.0 : 0.0, TimeSpan.FromMilliseconds(160));
         if (visible)
         {
-            Opacity = 0;
-            Show();
-            SetRaised(_raised);
+            if (!IsVisible)
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = 0;
+                if (_hwnd != IntPtr.Zero && !_peek)
+                    ApplyDesktopZOrder(requireVisible: false);
+                Show();
+            }
+            if (!_peek)
+                ApplyDesktopZOrder(requireVisible: true);
         }
         else
         {
-            anim.Completed += (_, _) => { if (Opacity == 0) Hide(); };
+            anim.Completed += (_, _) =>
+            {
+                // Opacity == 0 の最終フレームが合成・提示されてから Hide() する
+                if (Opacity == 0 && _fadeHide.TryScheduleHide(gen))
+                    HookPendingHideRender();
+            };
         }
         BeginAnimation(OpacityProperty, anim);
+    }
+
+    private void HookPendingHideRender()
+    {
+        if (_hideRenderHooked) return;
+        _hideRenderHooked = true;
+        CompositionTarget.Rendering += OnPendingHideRender;
+    }
+
+    private void UnhookPendingHideRender()
+    {
+        if (!_hideRenderHooked) return;
+        _hideRenderHooked = false;
+        CompositionTarget.Rendering -= OnPendingHideRender;
+    }
+
+    private void CancelPendingHide()
+    {
+        _fadeHide.Cancel();
+        UnhookPendingHideRender();
+    }
+
+    private void OnPendingHideRender(object? sender, EventArgs e)
+    {
+        if (!_fadeHide.OnFrameRendered())
+        {
+            if (!_fadeHide.IsHidePending) UnhookPendingHideRender();
+            return;
+        }
+        UnhookPendingHideRender();
+        if (IsVisible && Opacity == 0) Hide();
     }
 
     // ------------------------------------------------------------------

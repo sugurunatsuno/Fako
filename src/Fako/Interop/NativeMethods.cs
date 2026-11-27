@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace Fako.Interop;
 
@@ -21,10 +20,12 @@ internal static class NativeMethods
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_HIDEWINDOW = 0x0080;
     public const uint SWP_NOOWNERZORDER = 0x0200;
     public static readonly IntPtr HWND_TOP = IntPtr.Zero;
     public static readonly IntPtr HWND_BOTTOM = new(1);
     public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new(-2);
 
     public const uint MOD_ALT = 0x0001;
     public const uint MOD_CONTROL = 0x0002;
@@ -111,13 +112,39 @@ internal static class NativeMethods
     public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string? lpszClass, string? lpszWindow);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    private static extern int GetClassName(IntPtr hWnd, [Out] char[] lpClassName, int nMaxCount);
+
+    [ThreadStatic]
+    private static char[]? t_classNameBuffer;
+
+    private static char[] ClassNameBuffer => t_classNameBuffer ??= new char[256];
 
     public static string GetClassName(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return string.Empty;
-        var sb = new StringBuilder(256);
-        return GetClassName(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : string.Empty;
+        var buf = ClassNameBuffer;
+        int len = GetClassName(hwnd, buf, buf.Length);
+        return len > 0 ? new string(buf, 0, len) : string.Empty;
+    }
+
+    /// <summary>文字列アロケーション無しでウィンドウクラス名を照合する。</summary>
+    public static bool IsWindowClass(IntPtr hwnd, ReadOnlySpan<char> expected)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        var buf = ClassNameBuffer;
+        int len = GetClassName(hwnd, buf, buf.Length);
+        return len == expected.Length && buf.AsSpan(0, len).SequenceEqual(expected);
+    }
+
+    /// <summary>ウィンドウクラス名が Progman または WorkerW かを無アロケーションで判定する。</summary>
+    public static bool IsDesktopRootClass(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        var buf = ClassNameBuffer;
+        int len = GetClassName(hwnd, buf, buf.Length);
+        if (len != 7) return false;
+        var span = buf.AsSpan(0, len);
+        return span.SequenceEqual("Progman") || span.SequenceEqual("WorkerW");
     }
 
     [DllImport("user32.dll")]

@@ -217,12 +217,13 @@ public partial class App : Application
     private ForegroundWatcher? _foreground;
     private bool _raised;
 
-    /// <summary>デスクトップが前面のときはフェンスをその上に、他のアプリが前面なら最背面へ。</summary>
+    /// <summary>デスクトップの直上（他アプリより背面）へフェンスの Z オーダーを整える。</summary>
     private void SetFencesRaised(bool raised)
     {
         _raised = raised;
-        foreach (var w in _windows)
-            w.SetRaised(raised);
+        // 末尾から順に配置することで、複数フェンスがまとめて再配置されても重なり順を維持する
+        for (int i = _windows.Count - 1; i >= 0; i--)
+            _windows[i].SetRaised(raised);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -935,8 +936,17 @@ public partial class App : Application
     public void SetAllHidden(bool hidden)
     {
         AllHidden = hidden;
-        foreach (var w in _windows.ToList())
-            w.FadeTo(!hidden);
+        if (!hidden)
+        {
+            // 再表示時は末尾から順に配置することで、複数フェンスの重なり順を維持する
+            for (int i = _windows.Count - 1; i >= 0; i--)
+                _windows[i].FadeTo(true);
+        }
+        else
+        {
+            for (int i = 0; i < _windows.Count; i++)
+                _windows[i].FadeTo(false);
+        }
     }
 
     public void SetDoubleClickToHide(bool enabled)
