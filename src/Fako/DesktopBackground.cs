@@ -13,8 +13,22 @@ internal sealed class DesktopBackground
     private string? _path;
     private BitmapSource? _image;
 
+    internal int DecodeCount { get; private set; }
+
     internal static double NormalizeOpacity(double opacity) =>
         double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
+
+    internal static string NormalizeStretch(string? mode) =>
+        mode is "Uniform" or "Fill" ? mode : "UniformToFill";
+
+    /// <summary>WPF の Border が Background を描画する内側領域（枠の太さを除いたローカル矩形）。</summary>
+    internal static Rect InnerLocalBounds(double actualWidth, double actualHeight, Thickness borderThickness)
+    {
+        double width = actualWidth - borderThickness.Left - borderThickness.Right;
+        double height = actualHeight - borderThickness.Top - borderThickness.Bottom;
+        if (width <= 0 || height <= 0) return Rect.Empty;
+        return new Rect(borderThickness.Left, borderThickness.Top, width, height);
+    }
 
     // Screen.Bounds と PointToScreen は物理ピクセルに統一する。
     internal static Rect DesktopBounds()
@@ -30,9 +44,10 @@ internal sealed class DesktopBackground
 
     internal static Rect ImageBounds(Rect desktop, double width, double height, string? mode)
     {
-        if (mode == "Fill" || width <= 0 || height <= 0) return desktop;
+        var stretch = NormalizeStretch(mode);
+        if (stretch == "Fill" || width <= 0 || height <= 0) return desktop;
         double sx = desktop.Width / width, sy = desktop.Height / height;
-        double scale = mode == "Uniform" ? Math.Min(sx, sy) : Math.Max(sx, sy);
+        double scale = stretch == "Uniform" ? Math.Min(sx, sy) : Math.Max(sx, sy);
         double w = width * scale, h = height * scale;
         return new Rect(desktop.X + (desktop.Width - w) / 2,
             desktop.Y + (desktop.Height - h) / 2, w, h);
@@ -55,10 +70,10 @@ internal sealed class DesktopBackground
         return image;
     }
 
-    internal static string Import(string source)
+    internal static string Import(string source, string? targetDirectory = null)
     {
         _ = Decode(source); // 不正な画像は設定しない
-        var directory = Path.Combine(ConfigStore.Directory, "backgrounds");
+        var directory = targetDirectory ?? Path.Combine(ConfigStore.Directory, "backgrounds");
         System.IO.Directory.CreateDirectory(directory);
         var target = Path.Combine(directory, Guid.NewGuid().ToString("N") + Path.GetExtension(source));
         File.Copy(source, target);
@@ -71,21 +86,30 @@ internal sealed class DesktopBackground
         _path = path;
         _image = null;
         if (string.IsNullOrWhiteSpace(path)) return null;
-        try { _image = Decode(path); }
+        try
+        {
+            _image = Decode(path);
+            DecodeCount++;
+        }
         catch (Exception ex) { Log.Error("背景画像の読み込みに失敗", ex); }
         return _image;
     }
 
-    internal Brush CreateBrush(FenceStyle style, Rect region, double width, double height)
+    internal Brush CreateBrush(FenceStyle style, Rect region, double width, double height) =>
+        CreateBrush(style, DesktopBounds(), region, width, height);
+
+    internal Brush CreateBrush(FenceStyle style, Rect desktop, Rect region, double width, double height)
     {
         var color = ColorUtil.Parse(style.Background, ColorUtil.DefaultBackground, 0x10);
         var tint = new SolidColorBrush(color);
+        tint.Freeze();
+        var opacity = NormalizeOpacity(style.BackgroundImageOpacity);
         var image = GetImage(style.BackgroundImagePath);
-        if (image is null || region.IsEmpty || region.Width <= 0 || region.Height <= 0
-            || width <= 0 || height <= 0 || NormalizeOpacity(style.BackgroundImageOpacity) == 0)
+        if (image is null || desktop.IsEmpty || desktop.Width <= 0 || desktop.Height <= 0
+            || region.IsEmpty || region.Width <= 0 || region.Height <= 0
+            || width <= 0 || height <= 0 || opacity == 0)
             return tint;
 
-        var desktop = DesktopBounds();
         var placement = ImageBounds(desktop, image.PixelWidth, image.PixelHeight, style.BackgroundImageStretch);
         var local = LocalImageBounds(placement, region, width, height);
         var area = new Rect(0, 0, width, height);
@@ -93,7 +117,7 @@ internal sealed class DesktopBackground
         var layers = new DrawingGroup { ClipGeometry = geometry };
         // 透明な描画でもブラシの座標系をフェンス全体に固定する。
         layers.Children.Add(new GeometryDrawing(Brushes.Transparent, null, geometry));
-        var imageLayer = new DrawingGroup { Opacity = NormalizeOpacity(style.BackgroundImageOpacity) };
+        var imageLayer = new DrawingGroup { Opacity = opacity };
         imageLayer.Children.Add(new ImageDrawing(image, local));
         layers.Children.Add(imageLayer);
         layers.Children.Add(new GeometryDrawing(tint, null, geometry));

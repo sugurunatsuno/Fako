@@ -17,6 +17,7 @@ public partial class FenceWindow
         LocationChanged += (_, _) => QueueDesktopBackground();
         Root.SizeChanged += (_, _) => QueueDesktopBackground();
         DpiChanged += (_, _) => QueueDesktopBackground();
+        IsVisibleChanged += (_, _) => { if (IsVisible) QueueDesktopBackground(); };
         SystemEvents.DisplaySettingsChanged += OnBackgroundDisplayChanged;
         Closed += (_, _) =>
         {
@@ -42,16 +43,22 @@ public partial class FenceWindow
 
     internal Rect? DesktopBackgroundRegion()
     {
-        if (PresentationSource.FromVisual(Root) is null || Root.ActualWidth <= 0 || Root.ActualHeight <= 0)
+        if (PresentationSource.FromVisual(Root) is null)
             return null;
-        var first = Root.PointToScreen(new Point(0, 0));
-        var last = Root.PointToScreen(new Point(Root.ActualWidth, Root.ActualHeight));
+        var inner = DesktopBackground.InnerLocalBounds(Root.ActualWidth, Root.ActualHeight, Root.BorderThickness);
+        if (inner.IsEmpty)
+            return null;
+        var first = Root.PointToScreen(inner.TopLeft);
+        var last = Root.PointToScreen(inner.BottomRight);
         return new Rect(first, last);
     }
 
     private void UpdateDesktopBackground()
     {
+        var inner = DesktopBackground.InnerLocalBounds(Root.ActualWidth, Root.ActualHeight, Root.BorderThickness);
         Root.Background = _desktopBackground.CreateBrush(Host.Style,
-            DesktopBackgroundRegion() ?? Rect.Empty, Root.ActualWidth, Root.ActualHeight);
+            DesktopBackgroundRegion() ?? Rect.Empty,
+            inner.IsEmpty ? 0 : inner.Width,
+            inner.IsEmpty ? 0 : inner.Height);
     }
 }

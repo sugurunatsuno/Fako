@@ -259,4 +259,64 @@ public class ConfigStoreLayoutTests
         Assert.Null(config);
         Assert.Contains("新しい形式", error);
     }
+
+    [Fact]
+    public void ExportImport_RoundTripsBackgroundImageStyle()
+    {
+        var config = CreateSampleConfig();
+        config.DefaultStyle.BackgroundImagePath = @"C:\Users\alice\AppData\Roaming\Fako\backgrounds\default.png";
+        config.DefaultStyle.BackgroundImageOpacity = 0.75;
+        config.DefaultStyle.BackgroundImageStretch = "Uniform";
+        config.Fences[0].Style.BackgroundImagePath = @"C:\Users\alice\AppData\Roaming\Fako\backgrounds\fence.jpg";
+        config.Fences[0].Style.BackgroundImageOpacity = 0.4;
+        config.Fences[0].Style.BackgroundImageStretch = "Fill";
+
+        var json = ConfigStore.ExportLayout(config);
+        var imported = ConfigStore.ImportLayout(json, out var error);
+
+        Assert.Null(error);
+        Assert.NotNull(imported);
+        Assert.Equal(@"C:\Users\alice\AppData\Roaming\Fako\backgrounds\default.png", imported!.DefaultStyle.BackgroundImagePath);
+        Assert.Equal(0.75, imported.DefaultStyle.BackgroundImageOpacity);
+        Assert.Equal("Uniform", imported.DefaultStyle.BackgroundImageStretch);
+
+        var fence = Assert.Single(imported.Fences);
+        Assert.Equal(@"C:\Users\alice\AppData\Roaming\Fako\backgrounds\fence.jpg", fence.Style.BackgroundImagePath);
+        Assert.Equal(0.4, fence.Style.BackgroundImageOpacity);
+        Assert.Equal("Fill", fence.Style.BackgroundImageStretch);
+    }
+
+    [Fact]
+    public void Import_LegacyLayoutWithoutBackgroundImageFields_UsesSafeDefaults()
+    {
+        const string legacyLayout = """
+            {
+              "Format": "fako-layout",
+              "FormatVersion": 1,
+              "Config": {
+                "DefaultStyle": { "Background": "#A0202428" },
+                "Fences": [
+                  {
+                    "Title": "旧レイアウト",
+                    "Style": { "Background": "#A0182640" }
+                  }
+                ]
+              }
+            }
+            """;
+
+        var imported = ConfigStore.ImportLayout(legacyLayout, out var error);
+
+        Assert.Null(error);
+        Assert.NotNull(imported);
+        Assert.Null(imported!.DefaultStyle.BackgroundImagePath);
+        Assert.Equal(1d, imported.DefaultStyle.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", imported.DefaultStyle.BackgroundImageStretch);
+
+        var fence = Assert.Single(imported.Fences);
+        Assert.Equal("#A0182640", fence.Style.Background);
+        Assert.Null(fence.Style.BackgroundImagePath);
+        Assert.Equal(1d, fence.Style.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", fence.Style.BackgroundImageStretch);
+    }
 }

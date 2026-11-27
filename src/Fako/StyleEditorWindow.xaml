@@ -88,20 +88,38 @@
                     </Grid>
 
                     <TextBlock Text="背景画像（画面全体）" Style="{StaticResource SectionTitle}" />
-                    <WrapPanel>
-                        <Button Content="画像を選択…" Click="OnPickBackgroundImage" Margin="0,0,8,0" />
-                        <Button Content="解除" Click="OnClearBackgroundImage" />
-                    </WrapPanel>
-                    <TextBlock x:Name="BackgroundImageName" TextWrapping="Wrap" Margin="0,4,0,0" />
-                    <TextBlock Text="画像の濃さ" Margin="0,8,0,0" />
-                    <Slider x:Name="BackgroundImageAlpha" Minimum="0" Maximum="100" TickFrequency="1"
-                            IsSnapToTickEnabled="True" ValueChanged="OnChanged" />
-                    <TextBlock Text="画面への配置" Margin="0,8,0,0" />
-                    <ComboBox x:Name="BackgroundImageMode" SelectionChanged="OnChanged">
-                        <ComboBoxItem Content="画面を埋める" Tag="UniformToFill" />
-                        <ComboBoxItem Content="画像全体を表示" Tag="Uniform" />
-                        <ComboBoxItem Content="引き伸ばす" Tag="Fill" />
-                    </ComboBox>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="110" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="画像" Style="{StaticResource Label}" />
+                        <WrapPanel Grid.Column="1" Grid.ColumnSpan="2">
+                            <Button Content="画像を選択…" Click="OnPickBackgroundImage" Margin="0,0,8,0" />
+                            <Button x:Name="ClearBackgroundImageButton" Content="解除" Click="OnClearBackgroundImage" />
+                        </WrapPanel>
+                        <TextBlock x:Name="BackgroundImageName" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                   Opacity="0.75" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                        <TextBlock Grid.Row="2" Text="画像の濃さ" Style="{StaticResource Label}" />
+                        <Slider x:Name="BackgroundImageAlpha" Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="100" Margin="0,8,0,0"
+                                TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnChanged" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource ValueText}"
+                                   Text="{Binding Value, ElementName=BackgroundImageAlpha, StringFormat={}{0:0}%}" />
+                        <TextBlock Grid.Row="3" Text="画面への配置" Style="{StaticResource Label}" />
+                        <ComboBox x:Name="BackgroundImageMode" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                                  Margin="0,8,0,0" SelectionChanged="OnChanged">
+                            <ComboBoxItem Content="画面を埋める" Tag="UniformToFill" />
+                            <ComboBoxItem Content="画像全体を表示" Tag="Uniform" />
+                            <ComboBoxItem Content="引き伸ばす" Tag="Fill" />
+                        </ComboBox>
+                    </Grid>
 
                     <TextBlock Text="タイトル" Style="{StaticResource SectionTitle}" />
                     <Grid>

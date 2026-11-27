@@ -556,10 +556,10 @@ public partial class FenceWindow : Window
     public void ApplyAppearance()
     {
         var s = Host.Style;
-        UpdateDesktopBackground();
         Root.BorderBrush = new SolidColorBrush(ColorUtil.Parse(s.BorderColor, Colors.Transparent));
         Root.BorderThickness = new Thickness(s.BorderThickness);
         Root.CornerRadius = new CornerRadius(s.CornerRadius);
+        UpdateDesktopBackground();
 
         TitleBar.Height = Math.Round(Math.Max(20, s.TitleFontSize * 2));
         TitleBar.Background = s.TitleBackground is { Length: > 0 } tb

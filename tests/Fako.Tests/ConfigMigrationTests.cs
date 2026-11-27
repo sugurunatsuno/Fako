@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Fako.Models;
 using Xunit;
 
@@ -48,5 +49,70 @@ public class ConfigMigrationTests
         var withNull = new AppConfig { Fences = new List<FenceConfig> { null!, new FenceConfig() } };
         withNull.Migrate();
         Assert.Single(withNull.Fences);
+    }
+
+    [Fact]
+    public void Migrate_NormalizesInvalidBackgroundImageSettings()
+    {
+        var fence = new FenceConfig
+        {
+            Style = new FenceStyle
+            {
+                BackgroundImagePath = "   ",
+                BackgroundImageOpacity = -0.5,
+                BackgroundImageStretch = "UnknownMode",
+            },
+        };
+        var config = new AppConfig
+        {
+            Fences = new List<FenceConfig> { fence },
+            DefaultStyle = new FenceStyle
+            {
+                BackgroundImagePath = "",
+                BackgroundImageOpacity = double.NaN,
+                BackgroundImageStretch = null!,
+            },
+        };
+
+        config.Migrate();
+
+        Assert.Null(fence.Style.BackgroundImagePath);
+        Assert.Equal(0d, fence.Style.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", fence.Style.BackgroundImageStretch);
+
+        Assert.Null(config.DefaultStyle.BackgroundImagePath);
+        Assert.Equal(1d, config.DefaultStyle.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", config.DefaultStyle.BackgroundImageStretch);
+    }
+
+    [Fact]
+    public void Migrate_LegacyJsonWithoutBackgroundImageFields_KeepsDefaults()
+    {
+        const string legacyJson = """
+            {
+              "Version": 1,
+              "DefaultStyle": { "Background": "#B0112233", "CornerRadius": 10 },
+              "Fences": [
+                {
+                  "Title": "既存フェンス",
+                  "Style": { "Background": "#C0445566" }
+                }
+              ]
+            }
+            """;
+
+        var config = JsonSerializer.Deserialize<AppConfig>(legacyJson)!;
+        config.Migrate();
+
+        Assert.Equal("#B0112233", config.DefaultStyle.Background);
+        Assert.Null(config.DefaultStyle.BackgroundImagePath);
+        Assert.Equal(1d, config.DefaultStyle.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", config.DefaultStyle.BackgroundImageStretch);
+
+        var fence = Assert.Single(config.Fences);
+        Assert.Equal("#C0445566", fence.Style.Background);
+        Assert.Null(fence.Style.BackgroundImagePath);
+        Assert.Equal(1d, fence.Style.BackgroundImageOpacity);
+        Assert.Equal("UniformToFill", fence.Style.BackgroundImageStretch);
     }
 }

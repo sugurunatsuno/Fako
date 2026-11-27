@@ -228,8 +228,18 @@ public partial class StyleEditorWindow : Window
 
     private readonly DesktopBackground _previewBackground = new();
 
-    private void RefreshBackgroundImageName() =>
-        BackgroundImageName.Text = _style.BackgroundImagePath ?? "未設定";
+    private void RefreshBackgroundImageName()
+    {
+        bool hasImage = !string.IsNullOrWhiteSpace(_style.BackgroundImagePath);
+        BackgroundImageName.Text = hasImage ? System.IO.Path.GetFileName(_style.BackgroundImagePath) : "未設定";
+        BackgroundImageName.ToolTip = hasImage ? _style.BackgroundImagePath : null;
+        ClearBackgroundImageButton.IsEnabled = hasImage;
+        BackgroundImageAlpha.IsEnabled = hasImage;
+        BackgroundImageMode.IsEnabled = hasImage;
+        double opacity = hasImage ? 1 : 0.4;
+        BackgroundImageAlpha.Opacity = opacity;
+        BackgroundImageMode.Opacity = opacity;
+    }
 
     private void OnPickBackgroundImage(object sender, RoutedEventArgs e)
     {
@@ -307,17 +317,19 @@ public partial class StyleEditorWindow : Window
         if (region is null || region.Value.IsEmpty)
             region = new Rect(desktop.X + desktop.Width * 0.15, desktop.Y + desktop.Height * 0.15,
                 desktop.Width * 0.35, desktop.Height * 0.25);
+        var inner = DesktopBackground.InnerLocalBounds(
+            PreviewRoot.ActualWidth, PreviewRoot.ActualHeight, PreviewRoot.BorderThickness);
         PreviewRoot.Background = _previewBackground.CreateBrush(_style, region.Value,
-            PreviewRoot.ActualWidth, PreviewRoot.ActualHeight);
+            inner.IsEmpty ? 0 : inner.Width, inner.IsEmpty ? 0 : inner.Height);
     }
 
     private void UpdatePreview()
     {
         var s = _style;
-        UpdateBackgroundPreview();
         PreviewRoot.BorderBrush = new SolidColorBrush(ColorUtil.Parse(s.BorderColor, Colors.Transparent));
         PreviewRoot.BorderThickness = new Thickness(s.BorderThickness);
         PreviewRoot.CornerRadius = new CornerRadius(s.CornerRadius);
+        UpdateBackgroundPreview();
         double inner = Math.Max(0, s.CornerRadius - s.BorderThickness);
         PreviewTitleBar.CornerRadius = new CornerRadius(inner, inner, 0, 0);
         PreviewTitleBar.Height = Math.Round(Math.Max(20, s.TitleFontSize * 2));
