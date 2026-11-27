@@ -96,11 +96,21 @@ public partial class FenceWindow
     private async void ReloadRemote(bool quiet = false)
     {
         ApplyRemoteUi();
+        var cfg = Config.Remote!;
+        // SSH エージェント認証で未接続のときは、60 秒の定期更新で勝手に再接続しない
+        // （Bitwarden 等の承認／ロック解除ダイアログが 1 分ごとに連打されるのを防ぐ）
+        if (quiet && cfg.Auth == RemoteAuth.Agent && CurrentSession is not { IsConnected: true })
+            return;
         _listCts?.Cancel();
         var cts = new CancellationTokenSource();
         _listCts = cts;
-        var cfg = Config.Remote!;
-        if (!quiet) SetRemoteStatus(CurrentSession == null ? $"{cfg.Display} に接続しています…" : "読み込んでいます…");
+        if (!quiet)
+        {
+            if (CurrentSession == null && cfg.Auth == RemoteAuth.Agent)
+                SetRemoteStatus($"{cfg.Display} に接続しています…（SSH エージェントの承認待ち）");
+            else
+                SetRemoteStatus(CurrentSession == null ? $"{cfg.Display} に接続しています…" : "読み込んでいます…");
+        }
 
         try
         {
@@ -142,7 +152,7 @@ public partial class FenceWindow
             if (quiet) return; // 定期更新の失敗では表示を消さない
             _items.Clear();
             _remoteEntries.Clear();
-            if (ex is HostKeyMismatchException or CredentialCancelledException) DisposeSession(Config.Id);
+            if (ex is HostKeyMismatchException or CredentialCancelledException or SshAgentException) DisposeSession(Config.Id);
             EmptyHint.Text = RemoteUi.Describe(ex) + "\n\n右クリック →「接続設定…」で見直すか、F5 でやり直してください。";
             EmptyHint.Visibility = Visibility.Visible;
             SetRemoteStatus($"{cfg.Display}  ·  接続できません", idle: true);
@@ -407,6 +417,11 @@ public partial class FenceWindow
         else
         {
             if (cfg.Port != 22) { args.Add("-p"); args.Add(cfg.Port.ToString()); }
+            if (cfg.Auth == RemoteAuth.Agent && !string.IsNullOrWhiteSpace(cfg.AgentPipe))
+            {
+                args.Add("-o");
+                args.Add($"\"IdentityAgent={cfg.AgentPipe}\"");
+            }
             if (cfg.Auth == RemoteAuth.KeyFile && cfg.KeyFile != null) { args.Add("-i"); args.Add($"\"{cfg.KeyFile}\""); }
             args.Add($"{cfg.User}@{cfg.Host}");
         }

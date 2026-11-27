@@ -25,6 +25,8 @@ public enum RemoteAuth
     /// <summary>秘密鍵ファイル（パスフレーズは任意）。</summary>
     KeyFile,
     Password,
+    /// <summary>SSH エージェント（Bitwarden / 1Password / Windows OpenSSH Agent 等）。</summary>
+    Agent,
 }
 
 /// <summary>SSH フェンスの接続先。</summary>
@@ -37,6 +39,10 @@ public sealed class RemoteConfig
     public string User { get; set; } = "";
     public RemoteAuth Auth { get; set; } = RemoteAuth.KeyFile;
     public string? KeyFile { get; set; }
+    /// <summary>SSH エージェントで特定の鍵のみを使う場合の指紋（SHA256:...）。null ならエージェント内のすべての鍵を試す。</summary>
+    public string? AgentKeyFingerprint { get; set; }
+    /// <summary>SSH エージェントの名前付きパイプを明示指定する場合のパス。null なら自動解決。</summary>
+    public string? AgentPipe { get; set; }
     /// <summary>パスワード／パスフレーズを DPAPI（このユーザーだけが復号できる）で暗号化したもの。保存しないなら null。</summary>
     public string? ProtectedSecret { get; set; }
     /// <summary>今表示しているフォルダー（空ならホームディレクトリ）。</summary>
@@ -332,6 +338,21 @@ public sealed class ConfigStore
     /// <summary>環境変数 FAKO_HOME で差し替え可能（テスト用）。旧名の KAKOI_HOME も受け付ける。</summary>
     public static string Directory { get; } = ResolveDirectory();
 
+    private readonly string _directory;
+    private readonly bool _skipLegacyMigration;
+
+    public ConfigStore() : this(Directory)
+    {
+    }
+
+    /// <summary>保存先を指定して作る（テストの隔離用）。</summary>
+    internal ConfigStore(string directory)
+    {
+        _directory = directory;
+        _skipLegacyMigration = !string.Equals(directory, Directory, StringComparison.OrdinalIgnoreCase);
+        FilePath = Path.Combine(directory, "config.json");
+    }
+
     private static string ResolveDirectory()
     {
         if (Environment.GetEnvironmentVariable("FAKO_HOME") is { Length: > 0 } home) return home;
@@ -339,7 +360,7 @@ public sealed class ConfigStore
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Fako");
     }
 
-    public string FilePath { get; } = Path.Combine(Directory, "config.json");
+    public string FilePath { get; }
 
     /// <summary>フェンスの配置・外観・設定を JSON にする。SSH の保存済みパスワードは含めない。</summary>
     public static string ExportLayout(AppConfig config)
@@ -427,7 +448,7 @@ public sealed class ConfigStore
 
     public AppConfig Load()
     {
-        MigrateLegacy();
+        if (!_skipLegacyMigration) MigrateLegacy();
         if (!File.Exists(FilePath))
         {
             var fresh = new AppConfig();
@@ -444,7 +465,7 @@ public sealed class ConfigStore
         catch (Exception)
         {
             // 壊れていたら退避して新規に始める（黙って上書きしない）
-            var bad = Path.Combine(Directory, $"config.bad-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            var bad = Path.Combine(_directory, $"config.bad-{DateTime.Now:yyyyMMdd-HHmmss}.json");
             try { File.Copy(FilePath, bad, overwrite: true); } catch { }
             return new AppConfig();
         }
@@ -452,7 +473,7 @@ public sealed class ConfigStore
 
     public void Save(AppConfig config)
     {
-        System.IO.Directory.CreateDirectory(Directory);
+        System.IO.Directory.CreateDirectory(_directory);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(config, Options));
         File.Move(tmp, FilePath, overwrite: true);

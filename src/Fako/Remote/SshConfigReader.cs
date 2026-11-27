@@ -1,9 +1,17 @@
+using System.Buffers;
 using System.IO;
 
 namespace Fako.Remote;
 
 /// <summary>~/.ssh/config の Host エントリ（接続設定の入力補助に使う）。</summary>
-public sealed record SshHostEntry(string Alias, string HostName, string? User, int Port, string? IdentityFile)
+public sealed record SshHostEntry(
+    string Alias,
+    string HostName,
+    string? User,
+    int Port,
+    string? IdentityFile,
+    string? IdentityAgent = null,
+    bool IdentitiesOnly = false)
 {
     public override string ToString() =>
         Alias == HostName ? Alias : $"{Alias}（{(User != null ? User + "@" : "")}{HostName}{(Port == 22 ? "" : ":" + Port)}）";
@@ -11,6 +19,9 @@ public sealed record SshHostEntry(string Alias, string HostName, string? User, i
 
 internal static class SshConfigReader
 {
+    private static readonly SearchValues<char> OptionDelimiters = SearchValues.Create(" \t=");
+    private static readonly string[] DefaultKeyNames = ["id_ed25519", "id_ecdsa", "id_rsa"];
+
     public static string UserSshDir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh");
 
@@ -21,53 +32,79 @@ internal static class SshConfigReader
     public static List<SshHostEntry> Read()
     {
         var path = Path.Combine(UserSshDir, "config");
-        var result = new List<SshHostEntry>();
-        if (!File.Exists(path)) return result;
+        if (!File.Exists(path)) return new List<SshHostEntry>();
 
-        var blocks = new List<(List<string> Patterns, Dictionary<string, string> Options)>();
-        (List<string> Patterns, Dictionary<string, string> Options)? current = null;
         try
         {
-            foreach (var raw in File.ReadAllLines(path))
-            {
-                var line = raw.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-                var (key, value) = SplitOption(line);
-                if (key.Equals("Host", StringComparison.OrdinalIgnoreCase))
-                {
-                    current = (value.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(),
-                        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
-                    blocks.Add(current.Value);
-                }
-                else if (key.Equals("Match", StringComparison.OrdinalIgnoreCase))
-                {
-                    current = null; // Match ブロックは扱わない
-                }
-                else if (current is { } c && !c.Options.ContainsKey(key))
-                {
-                    c.Options[key] = value; // ssh と同じく最初の値が優先
-                }
-            }
+            return ReadFromLines(File.ReadAllLines(path));
         }
         catch (Exception ex)
         {
             Log.Error("~/.ssh/config を読めません", ex);
-            return result;
+            return new List<SshHostEntry>();
+        }
+    }
+
+    /// <summary>ssh config の行を解析する（テストや将来の Include 対応で使う）。</summary>
+    internal static List<SshHostEntry> ReadFromLines(IEnumerable<string> lines)
+    {
+        var result = new List<SshHostEntry>();
+        var blocks = new List<(string[] Patterns, Dictionary<string, string> Options)>();
+        (string[] Patterns, Dictionary<string, string> Options)? current = null;
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line[0] == '#') continue;
+            var (key, value) = SplitOption(line);
+            if (key.Equals("Host", StringComparison.OrdinalIgnoreCase))
+            {
+                current = (value.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+                blocks.Add(current.Value);
+            }
+            else if (key.Equals("Match", StringComparison.OrdinalIgnoreCase))
+            {
+                current = null; // Match ブロックは扱わない
+            }
+            else if (current is { } c)
+            {
+                c.Options.TryAdd(key, value); // ssh と同じく最初の値が優先
+            }
         }
 
-        var defaults = blocks.Where(b => b.Patterns.Contains("*")).SelectMany(b => b.Options)
-            .GroupBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Value, StringComparer.OrdinalIgnoreCase);
-
+        var defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (patterns, options) in blocks)
         {
-            foreach (var alias in patterns.Where(p => !p.Contains('*') && !p.Contains('?') && !p.StartsWith('!')))
+            if (Array.IndexOf(patterns, "*") < 0) continue;
+            foreach (var kv in options)
+                defaults.TryAdd(kv.Key, kv.Value);
+        }
+
+        string? userProfile = null;
+        foreach (var (patterns, options) in blocks)
+        {
+            foreach (var alias in patterns)
             {
+                if (alias.Contains('*') || alias.Contains('?') || alias.StartsWith('!')) continue;
                 string? Get(string k) => options.TryGetValue(k, out var v) ? v : defaults.TryGetValue(k, out var d) ? d : null;
                 var host = Get("HostName") ?? alias;
                 int port = int.TryParse(Get("Port"), out var p) ? p : 22;
                 var identity = Get("IdentityFile");
-                if (identity != null) identity = ExpandPath(identity, alias, host);
-                result.Add(new SshHostEntry(alias, host.Replace("%h", alias), Get("User"), port, identity));
+                if (identity != null)
+                {
+                    userProfile ??= Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    identity = ExpandPath(identity, alias, host, userProfile);
+                }
+                var identityAgent = Get("IdentityAgent");
+                if (identityAgent != null)
+                {
+                    identityAgent = NormalizeIdentityAgent(identityAgent, alias, host, ref userProfile);
+                }
+                var identitiesOnly = Get("IdentitiesOnly")?.Equals("yes", StringComparison.OrdinalIgnoreCase) == true;
+                var resolvedHost = host.Contains("%h", StringComparison.Ordinal) ? host.Replace("%h", alias) : host;
+                result.Add(new SshHostEntry(alias, resolvedHost, Get("User"), port, identity,
+                    identityAgent, identitiesOnly));
             }
         }
         return result;
@@ -76,9 +113,10 @@ internal static class SshConfigReader
     /// <summary>よく使われる既定の鍵ファイル（~/.ssh/id_ed25519 など）のうち、存在するもの。</summary>
     public static string? DefaultKeyFile()
     {
-        foreach (var name in new[] { "id_ed25519", "id_ecdsa", "id_rsa" })
+        var sshDir = UserSshDir;
+        foreach (var name in DefaultKeyNames)
         {
-            var p = Path.Combine(UserSshDir, name);
+            var p = Path.Combine(sshDir, name);
             if (File.Exists(p)) return p;
         }
         return null;
@@ -86,19 +124,38 @@ internal static class SshConfigReader
 
     private static (string Key, string Value) SplitOption(string line)
     {
-        int i = line.IndexOfAny(new[] { ' ', '\t', '=' });
+        int i = line.AsSpan().IndexOfAny(OptionDelimiters);
         if (i < 0) return (line, "");
         var key = line[..i];
-        var value = line[(i + 1)..].TrimStart(' ', '\t', '=').Trim();
+        var value = line.AsSpan(i + 1).TrimStart(" \t=").Trim();
         if (value.Length >= 2 && value[0] == '"' && value[^1] == '"') value = value[1..^1];
-        return (key, value);
+        return (key, value.ToString());
     }
 
-    private static string ExpandPath(string p, string alias, string host)
+    /// <summary>
+    /// IdentityAgent はパイプ名や予約語をそのまま保つ（~ 展開や / → \ の置換をしない）。
+    /// </summary>
+    private static string NormalizeIdentityAgent(string value, string alias, string host, ref string? userProfile)
     {
-        p = p.Replace("%h", host).Replace("%n", alias).Replace("%%", "%");
-        if (p.StartsWith("~/") || p.StartsWith("~\\"))
-            p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p[2..]);
-        return Environment.ExpandEnvironmentVariables(p.Replace('/', Path.DirectorySeparatorChar));
+        var p = value.Trim();
+        if (p.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            p.Equals("SSH_AUTH_SOCK", StringComparison.OrdinalIgnoreCase))
+            return p;
+        if (p.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase) ||
+            p.StartsWith("//./pipe/", StringComparison.OrdinalIgnoreCase))
+            return p;
+        userProfile ??= Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return ExpandPath(p, alias, host, userProfile);
+    }
+
+    private static string ExpandPath(string p, string alias, string host, string userProfile)
+    {
+        if (p.Contains('%'))
+            p = p.Replace("%h", host).Replace("%n", alias).Replace("%%", "%");
+        if (p.StartsWith("~/", StringComparison.Ordinal) || p.StartsWith("~\\", StringComparison.Ordinal))
+            p = Path.Combine(userProfile, p[2..]);
+        if (p.Contains('/'))
+            p = p.Replace('/', Path.DirectorySeparatorChar);
+        return p.Contains('%') ? Environment.ExpandEnvironmentVariables(p) : p;
     }
 }

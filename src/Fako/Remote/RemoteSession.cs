@@ -28,6 +28,9 @@ public sealed class RemoteSession : IDisposable
     /// <summary>UI スレッドで処理を実行する（ダイアログを出すため）。</summary>
     public Func<Func<object?>, object?>? InvokeOnUi { get; set; }
 
+    /// <summary>SSH エージェントクライアントの生成（テストで差し替えるため）。</summary>
+    internal Func<string?, ISshAgentClient> AgentClientFactory { get; set; } = pipe => OpenSshAgentClient.Create(pipe);
+
     private readonly RemoteConfig _cfg;
     private readonly Dictionary<string, string> _knownHosts;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -35,6 +38,9 @@ public sealed class RemoteSession : IDisposable
     private string? _hostKeyProblem;
 
     public string? Home { get; private set; }
+
+    /// <summary>いま SFTP でつながっているか。</summary>
+    public bool IsConnected => _client is { IsConnected: true };
 
     public RemoteSession(RemoteConfig cfg, Dictionary<string, string> knownHosts)
     {
@@ -74,7 +80,7 @@ public sealed class RemoteSession : IDisposable
                 client.Dispose();
                 throw new HostKeyMismatchException(_hostKeyProblem);
             }
-            catch (SshAuthenticationException) when (attempt < 2 && AskSecret != null)
+            catch (SshAuthenticationException) when (attempt < 2 && AskSecret != null && _cfg.Auth != RemoteAuth.Agent)
             {
                 client.Dispose();
                 // パスワード違い・未入力 → 入力してもらってやり直す
@@ -91,7 +97,8 @@ public sealed class RemoteSession : IDisposable
 
             _client = client;
             Home = client.WorkingDirectory;
-            if (secret != null && _cfg.ProtectedSecret == null) SecretCache.Set(_cfg, secret);
+            if (secret != null && _cfg.ProtectedSecret == null && _cfg.Auth != RemoteAuth.Agent)
+                SecretCache.Set(_cfg, secret);
             Log.Info($"sftp connected: {_cfg.Display} home={Home}");
             return;
         }
@@ -104,6 +111,38 @@ public sealed class RemoteSession : IDisposable
         {
             secret ??= Ask($"{_cfg.Display} のパスワードを入力してください");
             auth = new PasswordAuthenticationMethod(_cfg.User, secret);
+        }
+        else if (_cfg.Auth == RemoteAuth.Agent)
+        {
+            var client = AgentClientFactory(_cfg.AgentPipe);
+            var identities = client.RequestIdentities();
+            if (identities.Count == 0)
+                throw new SshAgentException(
+                    "SSH エージェントに鍵が登録されていません。Bitwarden や ssh-agent に SSH 鍵を追加し、ロックを解除してください。");
+
+            var fingerprint = _cfg.AgentKeyFingerprint?.Trim();
+            IPrivateKeySource[] sources;
+            if (string.IsNullOrEmpty(fingerprint))
+            {
+                sources = new IPrivateKeySource[identities.Count];
+                for (int i = 0; i < identities.Count; i++)
+                    sources[i] = new SshAgentPrivateKeySource(client, identities[i]);
+            }
+            else
+            {
+                var matched = new List<IPrivateKeySource>(1);
+                for (int i = 0; i < identities.Count; i++)
+                {
+                    if (string.Equals(identities[i].FingerprintSha256, fingerprint, StringComparison.Ordinal))
+                        matched.Add(new SshAgentPrivateKeySource(client, identities[i]));
+                }
+                if (matched.Count == 0)
+                    throw new SshAgentException(
+                        $"指定された鍵（{_cfg.AgentKeyFingerprint}）が SSH エージェントに見つかりません。アプリのロック状態や鍵設定を確認してください。");
+                sources = matched.ToArray();
+            }
+
+            auth = new PrivateKeyAuthenticationMethod(_cfg.User, sources);
         }
         else
         {
