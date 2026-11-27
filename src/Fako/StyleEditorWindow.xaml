@@ -87,6 +87,22 @@
                                    Text="{Binding Value, ElementName=BackgroundAlpha, StringFormat={}{0:0}%}" />
                     </Grid>
 
+                    <TextBlock Text="背景画像（画面全体）" Style="{StaticResource SectionTitle}" />
+                    <WrapPanel>
+                        <Button Content="画像を選択…" Click="OnPickBackgroundImage" Margin="0,0,8,0" />
+                        <Button Content="解除" Click="OnClearBackgroundImage" />
+                    </WrapPanel>
+                    <TextBlock x:Name="BackgroundImageName" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="画像の濃さ" Margin="0,8,0,0" />
+                    <Slider x:Name="BackgroundImageAlpha" Minimum="0" Maximum="100" TickFrequency="1"
+                            IsSnapToTickEnabled="True" ValueChanged="OnChanged" />
+                    <TextBlock Text="画面への配置" Margin="0,8,0,0" />
+                    <ComboBox x:Name="BackgroundImageMode" SelectionChanged="OnChanged">
+                        <ComboBoxItem Content="画面を埋める" Tag="UniformToFill" />
+                        <ComboBoxItem Content="画像全体を表示" Tag="Uniform" />
+                        <ComboBoxItem Content="引き伸ばす" Tag="Fill" />
+                    </ComboBox>
+
                     <TextBlock Text="タイトル" Style="{StaticResource SectionTitle}" />
                     <Grid>
                         <Grid.ColumnDefinitions>

@@ -121,6 +121,9 @@ public sealed class FenceConfig
 public sealed class FenceStyle
 {
     public string Background { get; set; } = "#A0202428";
+    public string? BackgroundImagePath { get; set; }
+    public double BackgroundImageOpacity { get; set; } = 1.0;
+    public string BackgroundImageStretch { get; set; } = "UniformToFill";
     /// <summary>null = 自動（背景に白を薄く重ねる）。</summary>
     public string? TitleBackground { get; set; }
     public string TitleForeground { get; set; } = "#FFFFFFFF";
