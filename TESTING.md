@@ -11,11 +11,14 @@
 dotnet test tests/Fako.Tests/Fako.Tests.csproj -c Release
 ```
 
-- **118 件 / 失敗 0 / スキップ 0**（約 2 秒、WPF オフスクリーン描画検証を含む）
+- **175 件 / 失敗 0 / スキップ 0**（約 1 秒、WPF オフスクリーン描画検証・SSH エージェント通信検証を含む）
 - 内訳:
   - `DesktopBackgroundTests` — 画面基準の画像配置・座標変換・枠の太さ補正・WPF `RenderTargetBitmap` ピクセル描画検証（移動固定・角丸クリップ・透過率・欠損フォールバック・再デコードなし）
+  - `SshAgentClientTests` — OpenSSH Agent プロトコル（RFC 9987）の名前付きパイプ通信、鍵一覧取得・署名要求・拒否／異常長／途中切断／タイムアウト、パイプ名解決・正規化、`.pub` 公開鍵の指紋計算、エラー文言
+  - `SshAgentKeySourceTests` — `SshAgentPrivateKeySource` / `SshAgentHostAlgorithm` のアルゴリズム展開（RSA SHA-2 優先）と署名委譲、`RemoteSession` の事前検証
+  - `SshConfigReaderTests` — `~/.ssh/config` の `IdentityAgent` / `IdentitiesOnly`、`Host *` 既定値継承、優先順位
   - `UpdateServiceTests` — リリースタグのバージョン解析（v 付き、pre-release、build メタデータ、不正値）
-  - `ConfigStoreLayoutTests` — 設定の書き出し／読み込み、タブ、背景画像スタイル往復、シークレット除去、形式・バージョン拒否、旧形式移行
+  - `ConfigStoreLayoutTests` — 設定の書き出し／読み込み、タブ、背景画像スタイル往復、SSH エージェント設定往復・旧 JSON 後方互換、シークレット除去、形式・バージョン拒否、旧形式移行
   - `ConfigMigrationTests` — `Items` / `Tabs` / `Fences` の null および背景画像設定の不正値を正規化する
   - `RuleEngineTests` — 拡張子・種類・名前・正規表現の条件評価と検証
   - `FolderListingTests` — フォルダー列挙の境界、最近のファイルのクランプ・並び順、自然順
@@ -70,7 +73,7 @@ CI（`.github/workflows/ci-cd.yml`）は main への push と Pull Request で
 | 種類 | ショートカット（ドロップ登録、移動しない） | 手動 |
 | 種類 | フォルダーポータル（自動反映） | 手動 |
 | 種類 | 未整理（デスクトップ、シェル項目、外からのドロップ） | 手動 |
-| 種類 | SSH（SFTP、保存時アップロード、ホスト鍵） | 手動（実機） |
+| 種類 | SSH（SFTP、保存時アップロード、ホスト鍵、SSH エージェント認証・鍵選択） | 手動（実機）／自動（エージェント通信・鍵選択） |
 | 種類 | 最近のファイル（仮想、24 時間） | 自動（読込） |
 | タブ | 追加・閉じる・切り離し・結合・並べ替え・Ctrl+Tab | 手動 |
 | 表示 | 特大／大／中／小／一覧／詳細／並べて表示、Ctrl+ホイール | 手動 |

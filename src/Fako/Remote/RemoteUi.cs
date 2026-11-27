@@ -70,6 +70,12 @@ internal static class RemoteUi
         {
             HostKeyMismatchException => ex.Message,
             CredentialCancelledException => "資格情報の入力がキャンセルされました。",
+            SshAgentUnavailableException =>
+                "SSH エージェントに接続できません。Bitwarden・1Password・OpenSSH エージェントなどが起動しているか確認してください。\n" +
+                "（Windows 標準の OpenSSH Authentication Agent サービスと競合している場合は停止してください）",
+            SshAgentOperationRefusedException =>
+                "SSH エージェントによって署名が拒否されました。アプリのロックを解除するか、承認ダイアログで許可してからやり直してください。",
+            SshAgentException => ex.Message,
             SshAuthenticationException => $"認証に失敗しました。ユーザー名・鍵・パスワードを確認してください。\n（{ex.Message}）",
             SshPassPhraseNullOrEmptyException => "鍵にパスフレーズが必要です。",
             SocketException se => $"サーバーに接続できません。ホスト名・ポート・ネットワークを確認してください。\n（{se.Message}）",

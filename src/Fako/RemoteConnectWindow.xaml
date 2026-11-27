@@ -34,6 +34,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Text="~/.ssh/config" Style="{StaticResource Label}" />
@@ -51,12 +52,28 @@
 
             <TextBlock Grid.Row="3" Text="認証" Style="{StaticResource Label}" Margin="0,10,12,0" />
             <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                <RadioButton x:Name="AgentRadio" Content="SSH エージェント" GroupName="Auth" Checked="OnAuthChanged" MinWidth="140" />
                 <RadioButton x:Name="KeyRadio" Content="秘密鍵ファイル" GroupName="Auth" Checked="OnAuthChanged" MinWidth="140" />
                 <RadioButton x:Name="PasswordRadio" Content="パスワード" GroupName="Auth" Checked="OnAuthChanged" />
             </StackPanel>
 
-            <TextBlock x:Name="KeyLabel" Grid.Row="4" Text="鍵ファイル" Style="{StaticResource Label}" Margin="0,10,12,0" />
-            <StackPanel x:Name="KeyPanel" Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
+            <TextBlock x:Name="AgentLabel" Grid.Row="4" Text="エージェント" Style="{StaticResource Label}" Margin="0,10,12,0" VerticalAlignment="Top" />
+            <StackPanel x:Name="AgentPanel" Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
+                <DockPanel>
+                    <Button x:Name="RefreshAgentButton" DockPanel.Dock="Right" Content="更新" VerticalAlignment="Top"
+                            Margin="8,0,0,0" Click="OnRefreshAgent" />
+                    <TextBlock x:Name="AgentStatusText" TextWrapping="Wrap" />
+                </DockPanel>
+                <TextBlock Text="使用する鍵" Style="{StaticResource Label}" Margin="0,10,0,2" />
+                <ComboBox x:Name="AgentKeyCombo" DisplayMemberPath="Label" SelectionChanged="OnAgentKeyChanged" />
+                <TextBlock Text="パイプ名（任意）" Style="{StaticResource Label}" Margin="0,10,0,2" />
+                <TextBox x:Name="AgentPipeBox" LostFocus="OnAgentPipeChanged" />
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="空なら自動（SSH_AUTH_SOCK → \\.\pipe\openssh-ssh-agent）。Bitwarden や 1Password を使う場合は、Windows の「OpenSSH Authentication Agent」サービスを停止してください。" />
+            </StackPanel>
+
+            <TextBlock x:Name="KeyLabel" Grid.Row="5" Text="鍵ファイル" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel x:Name="KeyPanel" Grid.Row="5" Grid.Column="1" Margin="0,10,0,0">
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="参照…" Margin="8,0,0,0" Click="OnBrowseKey" />
                     <TextBox x:Name="KeyFileBox" />
@@ -64,25 +81,25 @@
                 <TextBlock Style="{StaticResource Hint}" Text="空なら ~/.ssh/id_ed25519・id_ecdsa・id_rsa の順に使います（OpenSSH 形式の鍵）。" />
             </StackPanel>
 
-            <TextBlock x:Name="SecretLabel" Grid.Row="5" Text="パスフレーズ" Style="{StaticResource Label}" Margin="0,10,12,0" />
-            <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,10,0,0">
+            <TextBlock x:Name="SecretLabel" Grid.Row="6" Text="パスフレーズ" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel x:Name="SecretPanel" Grid.Row="6" Grid.Column="1" Margin="0,10,0,0">
                 <PasswordBox x:Name="SecretBox" />
                 <CheckBox x:Name="SaveSecretBox" Margin="0,6,0,0"
                           Content="保存する（Windows の DPAPI で暗号化し、このユーザーだけが復号できます）" />
                 <TextBlock x:Name="SecretHint" Style="{StaticResource Hint}" />
             </StackPanel>
 
-            <TextBlock Grid.Row="6" Text="リモートのフォルダー" Style="{StaticResource Label}" Margin="0,10,12,0" />
-            <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,10,0,0">
+            <TextBlock Grid.Row="7" Text="リモートのフォルダー" Style="{StaticResource Label}" Margin="0,10,12,0" />
+            <StackPanel Grid.Row="7" Grid.Column="1" Margin="0,10,0,0">
                 <TextBox x:Name="PathBox" />
                 <TextBlock Style="{StaticResource Hint}" Text="空ならホームディレクトリ。フェンスの中でフォルダーを移動すると、ここも更新されます。" />
             </StackPanel>
 
-            <CheckBox x:Name="ShowHiddenBox" Grid.Row="7" Grid.Column="1" Margin="0,10,0,0"
+            <CheckBox x:Name="ShowHiddenBox" Grid.Row="8" Grid.Column="1" Margin="0,10,0,0"
                       Content="「.」で始まるファイル・フォルダーも表示する" />
 
-            <TextBlock Grid.Row="8" Text="ホスト鍵" Style="{StaticResource Label}" Margin="0,12,12,0" VerticalAlignment="Top" />
-            <StackPanel Grid.Row="8" Grid.Column="1" Margin="0,12,0,0">
+            <TextBlock Grid.Row="9" Text="ホスト鍵" Style="{StaticResource Label}" Margin="0,12,12,0" VerticalAlignment="Top" />
+            <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,12,0,0">
                 <TextBlock x:Name="HostKeyText" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
                 <Button x:Name="ForgetHostKeyButton" Content="信頼済みのホスト鍵を削除" HorizontalAlignment="Left" Margin="0,6,0,0"
                         Click="OnForgetHostKey" />

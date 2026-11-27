@@ -319,4 +319,102 @@ public class ConfigStoreLayoutTests
         Assert.Equal(1d, fence.Style.BackgroundImageOpacity);
         Assert.Equal("UniformToFill", fence.Style.BackgroundImageStretch);
     }
+
+    [Fact]
+    public void ExportImport_RoundTripsAgentSettings()
+    {
+        var config = CreateSampleConfig();
+        config.Fences[0].Remote!.Auth = RemoteAuth.Agent;
+        config.Fences[0].Remote!.AgentKeyFingerprint = "SHA256:agent-key";
+        config.Fences[0].Remote!.AgentPipe = @"\\.\pipe\custom-agent";
+        config.Fences[0].Remote!.KeyFile = null;
+        config.Fences[0].Remote!.ProtectedSecret = null;
+
+        var imported = ConfigStore.ImportLayout(ConfigStore.ExportLayout(config), out var error);
+
+        Assert.Null(error);
+        var remote = Assert.Single(imported!.Fences).Remote!;
+        Assert.Equal(RemoteAuth.Agent, remote.Auth);
+        Assert.Equal("SHA256:agent-key", remote.AgentKeyFingerprint);
+        Assert.Equal(@"\\.\pipe\custom-agent", remote.AgentPipe);
+    }
+
+    [Fact]
+    public void SaveLoad_RoundTripsAgentSettings()
+    {
+        var dir = TestTemp.CreateDirectory();
+        try
+        {
+            var store = new ConfigStore(dir);
+            var config = new AppConfig();
+            config.Fences.Add(new FenceConfig
+            {
+                Title = "エージェント",
+                Remote = new RemoteConfig
+                {
+                    Host = "agent.example.com",
+                    Port = 2222,
+                    User = "alice",
+                    Auth = RemoteAuth.Agent,
+                    AgentKeyFingerprint = "SHA256:saved-key",
+                    AgentPipe = @"\\.\pipe\saved-agent",
+                    Path = "/srv/share",
+                },
+            });
+
+            store.Save(config);
+            var loaded = store.Load();
+
+            var remote = Assert.Single(loaded.Fences).Remote!;
+            Assert.Equal("agent.example.com", remote.Host);
+            Assert.Equal(2222, remote.Port);
+            Assert.Equal("alice", remote.User);
+            Assert.Equal(RemoteAuth.Agent, remote.Auth);
+            Assert.Equal("SHA256:saved-key", remote.AgentKeyFingerprint);
+            Assert.Equal(@"\\.\pipe\saved-agent", remote.AgentPipe);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Load_OldJsonWithoutAgentPropertiesUsesNulls()
+    {
+        var dir = TestTemp.CreateDirectory();
+        try
+        {
+            var store = new ConfigStore(dir);
+            File.WriteAllText(store.FilePath, """
+                {
+                  "Version": 1,
+                  "Fences": [
+                    {
+                      "Title": "旧設定",
+                      "Remote": {
+                        "Host": "old.example.com",
+                        "Port": 22,
+                        "User": "bob",
+                        "Auth": "KeyFile",
+                        "KeyFile": "C:\\keys\\id_rsa"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+            var loaded = store.Load();
+
+            var remote = Assert.Single(loaded.Fences).Remote!;
+            Assert.Equal(RemoteAuth.KeyFile, remote.Auth);
+            Assert.Equal(@"C:\keys\id_rsa", remote.KeyFile);
+            Assert.Null(remote.AgentKeyFingerprint);
+            Assert.Null(remote.AgentPipe);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
