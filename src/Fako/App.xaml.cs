@@ -530,6 +530,15 @@ public partial class App : Application
             config.SortKey = SortKey.Modified;
             config.SortDescending = true;
         }
+        if (mode == FenceMode.Apps)
+        {
+            config.Title = "アプリ";
+            config.View = FenceView.Medium;
+            config.SortKey = SortKey.Name;
+            config.SortDescending = false;
+            config.Width = 480;
+            config.Height = 360;
+        }
         if (portalPath != null)
             config.Title = Path.GetFileName(portalPath.TrimEnd('\\')) is { Length: > 0 } n ? n : portalPath;
         if (title != null) config.Title = title;

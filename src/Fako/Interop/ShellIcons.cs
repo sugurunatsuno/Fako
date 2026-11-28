@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -24,6 +25,69 @@ internal static class ShellIcons
         var meta = GetMeta(path);
         var icon = GetIcon(path, iconPx, meta.Exists);
         return new FenceItem(path, meta.Name, meta.Exists, meta.IsFolder, meta.TypeName, meta.Size, meta.Modified, icon);
+    }
+
+    private const int BulkIconFetchThreshold = 48;
+
+    public static FenceItem CreateAppItem(AppEntry entry, int iconPx)
+    {
+        MetaCache[entry.ParsingPath] = new Meta(entry.DisplayName, true, false, "アプリケーション", null, null);
+        var icon = GetIcon(entry.ParsingPath, iconPx, exists: true);
+        return new FenceItem(entry.ParsingPath, entry.DisplayName, true, false, "アプリケーション", null, null, icon);
+    }
+
+    /// <summary>
+    /// アプリ一覧をまとめて FenceItem 化する。未キャッシュのアイコンが多数ある場合は
+    /// FOLDERID_AppsFolder の 1 回走査で直接取得して SHCreateItemFromParsingName の再呼び出しを省く。
+    /// </summary>
+    public static List<FenceItem> CreateAppItems(bool hideNoise, int iconPx)
+    {
+        IReadOnlyList<AppEntry> entries;
+        if (!ShellApps.HasCache && iconPx > 0)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var raw = ShellApps.EnumerateAndFetchIcons(
+                iconPx,
+                entry => seen.Add(entry.AppId)
+                         && (!hideNoise || !AppsListing.IsNoiseApp(entry.DisplayName, entry.AppId))
+                         && !HasAppIcon(entry.ParsingPath, iconPx),
+                (parsingPath, icon) => SetAppIcon(parsingPath, iconPx, icon));
+            entries = AppsListing.Filter(raw, hideNoise);
+        }
+        else
+        {
+            entries = AppsListing.ListInstalled(hideNoise);
+            if (iconPx > 0)
+            {
+                var missingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in entries)
+                {
+                    if (!HasAppIcon(entry.ParsingPath, iconPx))
+                        missingIds.Add(entry.AppId);
+                }
+
+                if (missingIds.Count >= BulkIconFetchThreshold)
+                {
+                    ShellApps.FetchIcons(missingIds, iconPx, (appId, icon) =>
+                        SetAppIcon(FolderListing.AppPrefix + appId, iconPx, icon));
+                }
+            }
+        }
+
+        var items = new List<FenceItem>(entries.Count);
+        foreach (var entry in entries)
+            items.Add(CreateAppItem(entry, iconPx));
+        return items;
+    }
+
+    private static bool HasAppIcon(string parsingPath, int px) =>
+        IconCache.TryGetValue(parsingPath, out var bySize) && bySize.ContainsKey(px);
+
+    private static void SetAppIcon(string parsingPath, int px, ImageSource? icon)
+    {
+        if (!IconCache.TryGetValue(parsingPath, out var bySize))
+            IconCache[parsingPath] = bySize = new Dictionary<int, ImageSource?>();
+        bySize[px] = icon;
     }
 
     public static string GetName(string path) => GetMeta(path).Name;
@@ -120,6 +184,15 @@ internal static class ShellIcons
         }
     }
 
+    /// <summary>アプリ一覧項目（shell:AppsFolder\...）のメタデータ・アイコンキャッシュを破棄する。</summary>
+    public static void InvalidateApps()
+    {
+        foreach (var key in MetaCache.Keys.Where(FolderListing.IsAppItem).ToList())
+            MetaCache.Remove(key);
+        foreach (var key in IconCache.Keys.Where(FolderListing.IsAppItem).ToList())
+            IconCache.Remove(key);
+    }
+
     // ------------------------------------------------------------------
 
     private static Meta GetMeta(string path)
@@ -132,6 +205,17 @@ internal static class ShellIcons
             var shellMeta = new Meta(shellName ?? path, shellName != null, true, "システム フォルダー", null, null);
             MetaCache[path] = shellMeta;
             return shellMeta;
+        }
+
+        // インストール済みアプリ（"shell:AppsFolder\<AppId>"）
+        if (FolderListing.IsAppItem(path))
+        {
+            if (MetaCache.TryGetValue(path, out var appCached)) return appCached;
+            var appId = FolderListing.ExtractAppId(path);
+            var appName = ShellApps.GetDisplayName(appId);
+            var appMeta = new Meta(appName ?? appId, appName != null, false, "アプリケーション", null, null);
+            MetaCache[path] = appMeta;
+            return appMeta;
         }
 
         bool isFolder = Directory.Exists(path);
@@ -171,7 +255,9 @@ internal static class ShellIcons
         if (bySize.TryGetValue(px, out var cached))
             return cached;
 
-        var icon = (exists ? GetShellImage(path, px) : null) ?? GetIconByExtension(path);
+        ImageSource? icon = FolderListing.IsAppItem(path)
+            ? ShellApps.GetIcon(FolderListing.ExtractAppId(path), px)
+            : (exists ? GetShellImage(path, px) : null) ?? GetIconByExtension(path);
         bySize[px] = icon;
         return icon;
     }
@@ -250,48 +336,72 @@ internal static class ShellIcons
         return isFolder ? "ファイル フォルダー" : "ファイル";
     }
 
+    private static readonly int DibSectionSize = Marshal.SizeOf<DIBSECTION>();
+
     /// <summary>
     /// IShellItemImageFactory の HBITMAP は 32bpp のアルファ付き DIB。
     /// Imaging.CreateBitmapSourceFromHBitmap はアルファを落とすことがあるので自前で変換する。
     /// </summary>
-    private static BitmapSource? HBitmapToBitmapSource(IntPtr hbmp)
+    internal static BitmapSource? HBitmapToBitmapSource(IntPtr hbmp)
     {
-        int dsSize = Marshal.SizeOf<DIBSECTION>();
-        if (GetObject(hbmp, dsSize, out DIBSECTION ds) == dsSize
+        if (GetObject(hbmp, DibSectionSize, out DIBSECTION ds) == DibSectionSize
             && ds.dsBm.bmBitsPixel == 32 && ds.dsBm.bmBits != IntPtr.Zero)
         {
             int w = ds.dsBm.bmWidth, h = ds.dsBm.bmHeight, stride = ds.dsBm.bmWidthBytes;
-            var buf = new byte[stride * h];
-            Marshal.Copy(ds.dsBm.bmBits, buf, 0, buf.Length);
-
-            if (ds.dsBmih.biHeight > 0) // ボトムアップ DIB → 上下反転
+            if (w > 0 && h > 0 && stride >= w * 4)
             {
-                var row = new byte[stride];
-                for (int y = 0; y < h / 2; y++)
+                int totalBytes = checked(stride * h);
+                var buf = ArrayPool<byte>.Shared.Rent(totalBytes);
+                try
                 {
-                    int a = y * stride, b = (h - 1 - y) * stride;
-                    Buffer.BlockCopy(buf, a, row, 0, stride);
-                    Buffer.BlockCopy(buf, b, buf, a, stride);
-                    Buffer.BlockCopy(row, 0, buf, b, stride);
+                    if (ds.dsBmih.biHeight > 0) // ボトムアップ DIB → 行を逆順に直接コピー
+                    {
+                        for (int y = 0; y < h; y++)
+                        {
+                            Marshal.Copy(IntPtr.Add(ds.dsBm.bmBits, (h - 1 - y) * stride), buf, y * stride, stride);
+                        }
+                    }
+                    else
+                    {
+                        Marshal.Copy(ds.dsBm.bmBits, buf, 0, totalBytes);
+                    }
+
+                    bool hasAlpha = HasNonZeroAlpha(buf.AsSpan(0, totalBytes));
+                    var src = BitmapSource.Create(w, h, 96, 96,
+                        hasAlpha ? PixelFormats.Pbgra32 : PixelFormats.Bgr32, null, buf, stride);
+                    src.Freeze();
+                    return src;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buf);
                 }
             }
-
-            bool hasAlpha = false;
-            for (int i = 3; i < buf.Length; i += 4)
-            {
-                if (buf[i] != 0) { hasAlpha = true; break; }
-            }
-
-            var src = BitmapSource.Create(w, h, 96, 96,
-                hasAlpha ? PixelFormats.Pbgra32 : PixelFormats.Bgr32, null, buf, stride);
-            src.Freeze();
-            return src;
         }
 
         var fallback = Imaging.CreateBitmapSourceFromHBitmap(hbmp, IntPtr.Zero, Int32Rect.Empty,
             BitmapSizeOptions.FromEmptyOptions());
         fallback.Freeze();
         return fallback;
+    }
+
+    private static bool HasNonZeroAlpha(ReadOnlySpan<byte> bytes)
+    {
+        if ((bytes.Length & 3) == 0)
+        {
+            foreach (uint pixel in MemoryMarshal.Cast<byte, uint>(bytes))
+            {
+                if ((pixel & 0xFF000000u) != 0)
+                    return true;
+            }
+            return false;
+        }
+
+        for (int i = 3; i < bytes.Length; i += 4)
+        {
+            if (bytes[i] != 0) return true;
+        }
+        return false;
     }
 
     /// <summary>ファイルが存在しなくても拡張子からアイコンを得る。</summary>

@@ -145,7 +145,7 @@ public partial class FenceWindow : Window
         _collapseTimer.Tick += (_, _) =>
         {
             _collapseTimer.Stop();
-            if (IsMouseOver || ItemsList.IsKeyboardFocusWithin || _menuOpen || TitleEdit.IsVisible) return;
+            if (IsMouseOver || IsKeyboardFocusWithin || _menuOpen || TitleEdit.IsVisible) return;
             _hoverExpanded = false;
             ApplyRollup();
         };
@@ -171,8 +171,8 @@ public partial class FenceWindow : Window
         };
         Activated += (_, _) =>
         {
-            // フェンスをクリックしたら、そのまま矢印キー・文字入力で操作できるようにする
-            if (!ItemsList.IsKeyboardFocusWithin && !TitleEdit.IsVisible)
+            // フェンスをクリックしたら、そのまま矢印キー・文字入力で操作できるようにする（検索入力中は奪わない）
+            if (!ItemsList.IsKeyboardFocusWithin && !SearchBox.IsKeyboardFocusWithin && !TitleEdit.IsVisible)
                 ItemsList.Focus();
         };
         IsKeyboardFocusWithinChanged += (_, _) =>
@@ -279,7 +279,9 @@ public partial class FenceWindow : Window
             SortKey.Size => desc ? q.ThenByDescending(i => i.Size ?? -1) : q.ThenBy(i => i.Size ?? -1),
             _ => desc ? q.ThenByDescending(i => i.Name, logical) : q.ThenBy(i => i.Name, logical),
         };
-        return q.ThenBy(i => i.Name, logical);
+        return key is SortKey.Modified or SortKey.Type or SortKey.Size
+            ? q.ThenBy(i => i.Name, logical)
+            : q;
     }
 
     private void SetSort(SortKey key, bool? descending = null)
@@ -735,10 +737,17 @@ public partial class FenceWindow : Window
         _typeBuffer = "";
         if (IsRemote)
         {
+            ApplyAppsUi();
             ReloadRemote();
             return;
         }
+        if (IsApps)
+        {
+            ReloadApps();
+            return;
+        }
         ApplyRemoteUi();
+        ApplyAppsUi();
 
         IEnumerable<string> paths = Config.Mode switch
         {
@@ -767,6 +776,7 @@ public partial class FenceWindow : Window
         FenceMode.Portal => "このフォルダーは空です",
         FenceMode.Unsorted => "デスクトップは片付いています ✨",
         FenceMode.Recent => "最近のファイルはありません",
+        FenceMode.Apps => "インストール済みのアプリが見つかりません",
         _ => "ここにファイルやフォルダーをドロップ\n（元の場所からは移動しません）",
     };
 
@@ -821,25 +831,46 @@ public partial class FenceWindow : Window
 
     private void CloseSearch()
     {
+        if (ShouldKeepSearchBarOpen)
+        {
+            if (SearchBox.Text.Length > 0) SearchBox.Text = "";
+            _searchText = "";
+            _view.Refresh();
+            UpdateSearchPlaceholder();
+            UpdateEmptyHint();
+            ItemsList.Focus();
+            return;
+        }
         SearchBar.Visibility = Visibility.Collapsed;
         if (SearchBox.Text.Length > 0) SearchBox.Text = "";
         _searchText = "";
         _view.Refresh();
+        UpdateSearchPlaceholder();
         UpdateEmptyHint();
         ItemsList.Focus();
     }
 
+    private FenceItem? FirstVisibleItem()
+    {
+        foreach (var o in _view)
+        {
+            if (o is FenceItem item) return item;
+        }
+        return null;
+    }
+
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {
+        UpdateSearchPlaceholder();
         _searchText = SearchBox.Text.Trim();
         _view.Refresh();
-        if (ItemsList.SelectedItem is FenceItem selected && _view.Contains(selected))
+        if (ItemsList.SelectedItem is FenceItem selected && MatchesSearch(selected) && _view.Contains(selected))
         {
             ItemsList.ScrollIntoView(selected);
         }
         else
         {
-            ItemsList.SelectedItem = _view.Cast<FenceItem>().FirstOrDefault();
+            ItemsList.SelectedItem = FirstVisibleItem();
             if (ItemsList.SelectedItem is FenceItem first) ItemsList.ScrollIntoView(first);
         }
         UpdateEmptyHint();
@@ -847,14 +878,52 @@ public partial class FenceWindow : Window
 
     private void OnSearchKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key == Key.F && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            SearchBox.SelectAll();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Tab && Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && HasTabs)
+        {
+            SwitchRelative(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F5)
+        {
+            if (IsApps)
+            {
+                ShellApps.InvalidateCache();
+                ShellIcons.InvalidateApps();
+            }
+            else
+            {
+                ShellIcons.Invalidate(_items.Select(i => i.Path));
+            }
+            Reload();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
         {
             CloseSearch();
             e.Handled = true;
         }
         else if (e.Key == Key.Enter)
         {
-            if (ItemsList.SelectedItem is FenceItem item) OpenItem(item);
+            if (ItemsList.SelectedItem is FenceItem item)
+            {
+                OpenItem(item);
+                if (IsApps)
+                {
+                    if (ShouldKeepSearchBarOpen)
+                    {
+                        if (SearchBox.Text.Length > 0) SearchBox.Text = "";
+                    }
+                    else
+                    {
+                        CloseSearch();
+                    }
+                }
+            }
             e.Handled = true;
         }
         else if (e.Key is Key.Down or Key.Up)
@@ -888,6 +957,7 @@ public partial class FenceWindow : Window
         FenceMode.Portal when !string.IsNullOrEmpty(Config.PortalPath) => new[] { Config.PortalPath! },
         FenceMode.Unsorted => new[] { FolderListing.UserDesktop, FolderListing.CommonDesktop },
         FenceMode.Recent => FolderListing.RecentRoots(),
+        FenceMode.Apps => FolderListing.StartMenuProgramRoots(),
         _ => Array.Empty<string>(),
     };
 
@@ -903,7 +973,7 @@ public partial class FenceWindow : Window
                 {
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Attributes
                                    | NotifyFilters.LastWrite | NotifyFilters.Size,
-                    IncludeSubdirectories = false,
+                    IncludeSubdirectories = Config.Mode == FenceMode.Apps,
                 };
                 w.Created += OnFileSystemChanged;
                 w.Deleted += OnFileSystemChanged;
@@ -921,11 +991,19 @@ public partial class FenceWindow : Window
 
     private void OnFileSystemChanged(object sender, FileSystemEventArgs e)
     {
-        if (e is RenamedEventArgs r) ShellIcons.Invalidate(new[] { r.OldFullPath, r.FullPath });
-        else ShellIcons.Invalidate(new[] { e.FullPath });
+        var changedPaths = e is RenamedEventArgs r ? new[] { r.OldFullPath, r.FullPath } : new[] { e.FullPath };
 
         Dispatcher.BeginInvoke(() =>
         {
+            if (IsApps)
+            {
+                ShellApps.InvalidateCache();
+                ShellIcons.InvalidateApps();
+            }
+            else
+            {
+                ShellIcons.Invalidate(changedPaths);
+            }
             _refreshTimer.Stop();
             _refreshTimer.Start();
         });
@@ -977,6 +1055,14 @@ public partial class FenceWindow : Window
             Config.SortKey = SortKey.Modified;
             Config.SortDescending = true;
         }
+        else if (mode == FenceMode.Apps)
+        {
+            Config.Title = "アプリ";
+            Config.SortKey = SortKey.Name;
+            Config.SortDescending = false;
+            if (Config.View is FenceView.Details or FenceView.List or FenceView.Small)
+                Config.View = FenceView.Medium;
+        }
         else if (mode == FenceMode.Remote)
         {
             var cfg = RemoteConnectWindow.Edit(Config.Remote);
@@ -987,8 +1073,11 @@ public partial class FenceWindow : Window
 
         // ショートカットの一覧は残しておく（種類を戻したときに復活する）
         ResetRemote();
+        if (SearchBox.Text.Length > 0) SearchBox.Text = "";
+        _searchText = "";
         Config.Mode = mode;
         ApplyAppearance();
+        ApplyView();
         SetupWatchers();
         Reload();
         App.Current.OnItemsChanged();
@@ -1128,8 +1217,8 @@ public partial class FenceWindow : Window
 
         var paths = items.Select(i => i.Path).ToArray();
         var data = new DataObject();
-        // 外のアプリには実ファイルだけを渡す（ごみ箱などのシェル項目はフェンス間の移動用にだけ載せる）
-        var files = paths.Where(p => !FolderListing.IsShellItem(p)).ToArray();
+        // 外のアプリには実ファイルだけを渡す（ごみ箱などのシェル項目やアプリ項目はフェンス間の移動用にだけ載せる）
+        var files = paths.Where(p => !FolderListing.IsShellItem(p) && !FolderListing.IsAppItem(p)).ToArray();
         if (files.Length > 0) data.SetData(DataFormats.FileDrop, files);
         data.SetData(PathsFormat, paths);
         data.SetData(SourceFenceFormat, Config.Id);
@@ -1238,6 +1327,7 @@ public partial class FenceWindow : Window
 
     private void OnListMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left) return;
         if (ItemFromSource(e.OriginalSource) is not { } item) return;
         OpenItemFromMouse(item);
     }
@@ -1254,7 +1344,7 @@ public partial class FenceWindow : Window
 
         var item = _dragItem;
         _dragItem = null;
-        if (!App.Current.Config.SingleClickOpen || item is null) return;
+        if (!EffectiveSingleClickOpen || item is null) return;
         if (Keyboard.Modifiers != ModifierKeys.None) return;
         if (ItemFromSource(e.OriginalSource) != item) return;
         OpenItemFromMouse(item);
@@ -1361,16 +1451,29 @@ public partial class FenceWindow : Window
                 e.Handled = true;
                 break;
             case Key.F5:
-                ShellIcons.Invalidate(_items.Select(i => i.Path));
+                if (IsApps)
+                {
+                    ShellApps.InvalidateCache();
+                    ShellIcons.InvalidateApps();
+                }
+                else
+                {
+                    ShellIcons.Invalidate(_items.Select(i => i.Path));
+                }
                 Reload();
                 e.Handled = true;
                 break;
             case Key.Apps: // アプリケーションキー
-                ShowItemMenu(cursor: false);
-                e.Handled = true;
-                break;
             case Key.F10 when Keyboard.Modifiers == ModifierKeys.Shift:
-                ShowItemMenu(cursor: false);
+                if (IsApps)
+                {
+                    if (ItemsList.SelectedItems.Count > 0)
+                        OpenWpfMenu(BuildAppItemMenu(ItemsList.SelectedItems.Cast<FenceItem>().ToList()));
+                }
+                else
+                {
+                    ShowItemMenu(cursor: false);
+                }
                 e.Handled = true;
                 break;
         }
@@ -1385,6 +1488,16 @@ public partial class FenceWindow : Window
         if (string.IsNullOrEmpty(e.Text) || char.IsControl(e.Text[0])) return;
         // Ctrl / Alt 付きはショートカットなので拾わない（Shift は大文字入力に使える）
         if ((Keyboard.Modifiers & ~ModifierKeys.Shift) != ModifierKeys.None) return;
+
+        if (IsApps)
+        {
+            SearchBar.Visibility = Visibility.Visible;
+            SearchBox.Focus();
+            SearchBox.Text += e.Text;
+            SearchBox.CaretIndex = SearchBox.Text.Length;
+            e.Handled = true;
+            return;
+        }
 
         var now = DateTime.UtcNow;
         bool newBuffer = _typeBuffer.Length == 0 || now - _typeBufferAt > TypeBufferTimeout;
@@ -1676,6 +1789,7 @@ public partial class FenceWindow : Window
     private void OnPreviewRightButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (TitleEdit.IsKeyboardFocusWithin) return;
+        if (FindAncestor<TextBox>(e.OriginalSource as DependencyObject) == SearchBox) return;
 
         if (TabPageFromSource(e.OriginalSource) is { } tabPage) SwitchTo(tabPage);
         var item = ItemFromSource(e.OriginalSource);
@@ -1690,6 +1804,11 @@ public partial class FenceWindow : Window
             if (IsRemote)
             {
                 OpenWpfMenu(BuildRemoteItemMenu(ItemsList.SelectedItems.Cast<FenceItem>().ToList()));
+                return;
+            }
+            if (IsApps)
+            {
+                OpenWpfMenu(BuildAppItemMenu(ItemsList.SelectedItems.Cast<FenceItem>().ToList()));
                 return;
             }
             // マウス操作の処理が終わってから（モーダルのメニューを出すため）
@@ -1734,7 +1853,7 @@ public partial class FenceWindow : Window
         bool Intercept(string v)
         {
             if (!string.Equals(v, "rename", StringComparison.OrdinalIgnoreCase)) return false;
-            var target = live.FirstOrDefault(p => !FolderListing.IsShellItem(p));
+            var target = live.FirstOrDefault(p => !FolderListing.IsShellItem(p) && !FolderListing.IsAppItem(p));
             if (target != null) Dispatcher.BeginInvoke(() => RenameItem(target));
             return true;
         }
@@ -1772,7 +1891,11 @@ public partial class FenceWindow : Window
     {
         if (string.Equals(_lastShellVerb, "delete", StringComparison.OrdinalIgnoreCase) && Config.Mode == FenceMode.Shortcuts)
         {
-            var gone = _lastShellPaths.Where(p => !FolderListing.IsShellItem(p) && !File.Exists(p) && !Directory.Exists(p)).ToList();
+            var gone = _lastShellPaths.Where(p =>
+                !FolderListing.IsShellItem(p)
+                && (FolderListing.IsAppItem(p)
+                    ? ShellApps.GetDisplayName(FolderListing.ExtractAppId(p)) is null
+                    : !File.Exists(p) && !Directory.Exists(p))).ToList();
             if (gone.Count > 0)
             {
                 RemovePaths(gone);
@@ -1828,16 +1951,21 @@ public partial class FenceWindow : Window
     private ContextMenu BuildItemMenu(List<FenceItem> items)
     {
         var first = items[0];
+        bool isApp = FolderListing.IsAppItem(first.Path);
         var m = new ContextMenu();
         var open = AddItem(m, "開く", () => items.ForEach(i => ShellActions.Open(i.Path)));
         open.FontWeight = FontWeights.Bold;
         AddItem(m, "ファイルの場所を開く", () => ShellActions.OpenLocation(first.Path)).IsEnabled =
-            !FolderListing.IsShellItem(first.Path);
-        AddItem(m, "パスをコピー", () => Clipboard.SetText(string.Join(Environment.NewLine, items.Select(i => i.Path))));
+            !FolderListing.IsShellItem(first.Path) && !isApp;
+        AddItem(m, "パスをコピー", () =>
+        {
+            try { Clipboard.SetText(string.Join(Environment.NewLine, items.Select(i => i.Path))); }
+            catch (Exception ex) { Log.Error("クリップボードへのコピーに失敗", ex); }
+        });
         m.Items.Add(new Separator());
         if (Config.Mode == FenceMode.Shortcuts)
             AddItem(m, items.Count > 1 ? $"フェンスから外す（{items.Count} 個）" : "フェンスから外す", RemoveSelected);
-        AddItem(m, "プロパティ", () => ShellActions.ShowProperties(first.Path)).IsEnabled = first.Exists;
+        AddItem(m, "プロパティ", () => ShellActions.ShowProperties(first.Path)).IsEnabled = first.Exists && !isApp;
         return m;
     }
 
@@ -1845,6 +1973,7 @@ public partial class FenceWindow : Window
     {
         var m = new ContextMenu();
         if (IsRemote) AddRemoteFenceMenuItems(m);
+        if (IsApps) AddAppsFenceMenuItems(m);
 
         // エクスプローラーのデスクトップメニューと同じ並び: 表示 → 並べ替え
         var view = new MenuItem { Header = "表示", InputGestureText = "Ctrl+ホイール" };
@@ -1884,7 +2013,15 @@ public partial class FenceWindow : Window
         m.Items.Add(sort);
         AddItem(m, "最新の情報に更新 (F5)", () =>
         {
-            ShellIcons.Invalidate(_items.Select(i => i.Path));
+            if (IsApps)
+            {
+                ShellApps.InvalidateCache();
+                ShellIcons.InvalidateApps();
+            }
+            else
+            {
+                ShellIcons.Invalidate(_items.Select(i => i.Path));
+            }
             Reload();
         });
         m.Items.Add(new Separator());
@@ -1945,6 +2082,7 @@ public partial class FenceWindow : Window
         AddMode(kind, Config.Mode == FenceMode.Portal ? "フォルダーポータル（フォルダーを変更…）" : "フォルダーポータル…", FenceMode.Portal);
         AddMode(kind, "未整理（どのフェンスにも無いデスクトップ項目）", FenceMode.Unsorted);
         AddMode(kind, "最近のファイル（仮想）", FenceMode.Recent);
+        AddMode(kind, "アプリ一覧（Launchpad）", FenceMode.Apps);
         AddMode(kind, Config.Mode == FenceMode.Remote ? "SSH（接続先を変更…）" : "SSH（リモートのフォルダー）…", FenceMode.Remote);
         m.Items.Add(kind);
 

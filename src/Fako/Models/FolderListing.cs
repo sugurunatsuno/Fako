@@ -15,6 +15,23 @@ internal static class FolderListing
 
     public static bool IsShellItem(string path) => path.StartsWith(ShellPrefix, StringComparison.Ordinal);
 
+    /// <summary>インストール済みアプリ（shell:AppsFolder）を表すパスの接頭辞。</summary>
+    public const string AppPrefix = @"shell:AppsFolder\";
+
+    public static bool IsAppItem(string path) =>
+        path.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static string ExtractAppId(string path) =>
+        IsAppItem(path) ? path[AppPrefix.Length..] : path;
+
+    /// <summary>スタートメニューのプログラムフォルダー（アプリ追加・削除の監視用）。</summary>
+    public static IEnumerable<string> StartMenuProgramRoots() =>
+        new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
+            Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+        }.Where(d => !string.IsNullOrEmpty(d));
+
     /// <summary>
     /// デスクトップに表示できるシェル項目（Windows の「デスクトップ アイコンの設定」の項目）。
     /// 既定ではごみ箱だけが表示される。

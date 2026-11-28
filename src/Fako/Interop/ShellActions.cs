@@ -20,6 +20,13 @@ internal static class ShellActions
                 Process.Start("explorer.exe", "shell:" + path);
                 return;
             }
+            if (Models.FolderListing.IsAppItem(path))
+            {
+                var appPsi = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+                appPsi.ArgumentList.Add(path);
+                using var _ = Process.Start(appPsi);
+                return;
+            }
             var psi = new ProcessStartInfo(path) { UseShellExecute = true };
             if (File.Exists(path) && Path.GetDirectoryName(path) is { } dir)
                 psi.WorkingDirectory = dir;
@@ -32,6 +39,19 @@ internal static class ShellActions
         catch (Exception ex)
         {
             MessageBox.Show($"開けませんでした。\n{path}\n\n{ex.Message}", "Fako",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    public static void OpenAppsSettings()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:appsfeatures") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"設定を開けませんでした。\n\n{ex.Message}", "Fako",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }

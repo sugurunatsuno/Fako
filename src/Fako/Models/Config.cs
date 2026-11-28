@@ -18,6 +18,8 @@ public enum FenceMode
     Remote,
     /// <summary>最近更新されたファイル（仮想。実体を登録しない）。</summary>
     Recent,
+    /// <summary>インストール済みアプリ一覧（shell:AppsFolder の仮想フェンス）。</summary>
+    Apps,
 }
 
 public enum RemoteAuth
@@ -106,6 +108,13 @@ public sealed class FenceConfig
 
     /// <summary>「最近のファイル」フェンスで何時間前までを出すか。</summary>
     public int RecentHours { get; set; } = 24;
+
+    /// <summary>「アプリ一覧」フェンスでアンインストーラーやマニュアル等の補助項目を隠す。</summary>
+    public bool AppsHideNoise { get; set; } = true;
+    /// <summary>「アプリ一覧」フェンスではシングルクリックで起動する。</summary>
+    public bool AppsSingleClick { get; set; } = true;
+    /// <summary>「アプリ一覧」フェンスでは検索バーを常に表示する。</summary>
+    public bool AppsAlwaysShowSearch { get; set; } = true;
 
     /// <summary>
     /// タブ: このフェンス自身が 1 枚目のページで、ここに 2 枚目以降のページを持つ。
@@ -516,7 +525,8 @@ public sealed class FenceItem
         get
         {
             if (!Exists) return $"{Path}\n（見つかりません）";
-            var lines = new List<string> { Path, $"種類: {TypeName}" };
+            var header = FolderListing.IsAppItem(Path) ? Name : Path;
+            var lines = new List<string> { header, $"種類: {TypeName}" };
             if (Size != null) lines.Add($"サイズ: {SizeText}");
             if (Modified != null) lines.Add($"更新日時: {ModifiedText}");
             return string.Join("\n", lines);

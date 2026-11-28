@@ -265,13 +265,18 @@
                                 CornerRadius="4" Background="#14FFFFFF">
                             <DockPanel>
                                 <TextBlock DockPanel.Dock="Left" Text="🔍" Margin="7,0,2,0" VerticalAlignment="Center" Opacity="0.7" />
-                                <Button DockPanel.Dock="Right" Content="×" ToolTip="検索を閉じる (Esc)"
+                                <Button x:Name="SearchCloseButton" DockPanel.Dock="Right" Content="×" ToolTip="検索を閉じる (Esc)"
                                         Style="{StaticResource BarButton}" Click="OnCloseSearch" />
-                                <TextBox x:Name="SearchBox" Margin="4,2" BorderThickness="0" Background="Transparent"
-                                         Foreground="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
-                                         CaretBrush="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
-                                         VerticalContentAlignment="Center" FontSize="12"
-                                         TextChanged="OnSearchTextChanged" PreviewKeyDown="OnSearchKeyDown" />
+                                <Grid>
+                                    <TextBlock x:Name="SearchPlaceholder" IsHitTestVisible="False" Margin="6,2"
+                                               VerticalAlignment="Center" FontSize="12" Opacity="0.45"
+                                               Foreground="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    <TextBox x:Name="SearchBox" Margin="4,2" BorderThickness="0" Background="Transparent"
+                                             Foreground="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
+                                             CaretBrush="{Binding ItemForeground, RelativeSource={RelativeSource AncestorType=Window}}"
+                                             VerticalContentAlignment="Center" FontSize="12"
+                                             TextChanged="OnSearchTextChanged" PreviewKeyDown="OnSearchKeyDown" />
+                                </Grid>
                             </DockPanel>
                         </Border>
 

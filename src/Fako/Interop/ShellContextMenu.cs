@@ -45,7 +45,9 @@ internal sealed class ShellContextMenu
         if (paths.Count == 0) return false;
 
         // 同じ親フォルダーの項目だけを対象にする（IContextMenu は 1 つのフォルダー内の項目しか扱えない）
-        string ParentKey(string p) => FolderListing.IsShellItem(p) ? "::desktop" : (Path.GetDirectoryName(p.TrimEnd('\\')) ?? p);
+        string ParentKey(string p) => FolderListing.IsShellItem(p) ? "::desktop"
+            : FolderListing.IsAppItem(p) ? "::apps"
+            : (Path.GetDirectoryName(p.TrimEnd('\\')) ?? p);
         var key = ParentKey(paths[0]);
         var targets = paths.Where(p => string.Equals(ParentKey(p), key, StringComparison.OrdinalIgnoreCase)).ToList();
 

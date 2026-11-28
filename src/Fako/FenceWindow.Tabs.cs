@@ -86,6 +86,8 @@ public partial class FenceWindow
     {
         FenceMode.Portal => "フォルダーポータル",
         FenceMode.Unsorted => "未整理",
+        FenceMode.Recent => "最近のファイル",
+        FenceMode.Apps => "アプリ一覧",
         FenceMode.Remote => "SSH",
         _ => "ショートカット",
     };
@@ -146,7 +148,13 @@ public partial class FenceWindow
     public void SwitchTo(FenceConfig page)
     {
         if (page == Config || !Pages.Contains(page)) return;
-        if (SearchBar.IsVisible) CloseSearch();
+        bool searchFocused = SearchBox.IsKeyboardFocusWithin;
+        if (SearchBox.Text.Length > 0) SearchBox.Text = "";
+        _searchText = "";
+        if (page.Mode != FenceMode.Apps || !page.AppsAlwaysShowSearch)
+            SearchBar.Visibility = Visibility.Collapsed;
+        UpdateSearchPlaceholder();
+        if (searchFocused) ItemsList.Focus();
         EndRename(true);
         LeavePage();
         Config = page;

@@ -171,6 +171,7 @@ internal sealed class TrayIcon : IDisposable
         menu.Items.Add("フォルダーポータルを追加…", null, (_, _) => app.NewPortalFence());
         menu.Items.Add("未整理フェンスを追加", null, (_, _) => app.NewFence(FenceMode.Unsorted));
         menu.Items.Add("最近のファイル（仮想）を追加", null, (_, _) => app.NewFence(FenceMode.Recent));
+        menu.Items.Add("アプリ一覧（Launchpad）を追加", null, (_, _) => app.NewFence(FenceMode.Apps));
         menu.Items.Add("SSH フェンスを追加…", null, (_, _) => app.NewRemoteFence());
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
